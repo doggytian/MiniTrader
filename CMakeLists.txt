@@ -90,5 +90,8 @@ if(MINITRADER_BUILD_BENCH)
 
         add_executable(orderbook_bench bench/orderbook_bench.cpp)
         target_link_libraries(orderbook_bench minitrader_orderbook benchmark::benchmark)
+
+        add_executable(engine_bench bench/engine_bench.cpp)
+        target_link_libraries(engine_bench minitrader_engine minitrader_strategy benchmark::benchmark)
     endif()
 endif()

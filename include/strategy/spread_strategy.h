@@ -6,10 +6,13 @@
 
 namespace minitrader {
 
+class TradingEngine;  // forward declaration for cancel_resting_quotes
+
 struct SpreadStrategyConfig {
     uint64_t instrument_id{1};
     int64_t  half_spread{1};    // ticks each side from mid
     int32_t  order_size{10};    // lots per side
+    bool     verbose{true};     // print quotes/fills to stdout
 };
 
 /// Simple spread-making strategy.
@@ -35,6 +38,9 @@ public:
     void on_tick(const MarketTick& tick) override;
     void on_fill(const ExecutionReport& report) override;
     void on_stop() override;
+
+    /// Cancel resting quotes and reset internal IDs (for benchmarking).
+    void cancel_resting_quotes(TradingEngine& engine);
 
 private:
     uint64_t next_order_id() noexcept { return ++next_id_; }

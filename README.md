@@ -1,5 +1,7 @@
 # MiniTrader
 
+[![CI](https://github.com/tianxingyu/MiniTrader/actions/workflows/ci.yml/badge.svg)](https://github.com/tianxingyu/MiniTrader/actions/workflows/ci.yml)
+
 A minimal, high-performance trading system built from scratch in modern C++20.  
 Designed to demonstrate low-latency system design principles used in quantitative trading.
 
@@ -54,12 +56,19 @@ cmake --build build -j$(nproc)
 | Metric | Value | Notes |
 |--------|-------|-------|
 | SPSC enqueue-dequeue round-trip | **2.1 ns** | Single-threaded, int64_t payload |
-| SPSC round-trip (32-byte Order struct) | **2.5 ns** | |
+| SPSC round-trip (32-byte struct) | **2.5 ns** | |
 | SPSC throughput (burst 8) | **434 M ops/s** | |
 | OrderBook add\_order (single level) | **43 ns** | |
-| OrderBook cancel\_order (O(1) via map) | **24 ns** | unordered\_map lookup + list::erase |
-| OrderBook match (depth ≥ 10) | **~450 ns** | 1 incoming vs N resting, best price unchanged |
-| OrderBook match (depth = 1, best exhausted) | **~1.9 µs** | Triggers O(price\_range) best-price rescan |
+| OrderBook cancel\_order (O(1)) | **24 ns** | `unordered_map` lookup + `list::erase` |
+| OrderBook match (depth ≥ 10) | **~450 ns** | 1 incoming vs N resting |
+| **Full path: tick → strategy (no order)** | **65 ns** | SPSC dequeue + on_tick return |
+| **Full path: tick → 2× order submit** | **735 ns** | + 2× risk check + 2× book insert |
+
+### Latency Percentiles (100K tick steady-state)
+
+| P50 | P90 | P99 | P99.9 | Max |
+|-----|-----|-----|-------|-----|
+| 83 ns | 84 ns | 125 ns | 167 ns | ~14 µs |
 
 > Numbers above are single-threaded micro-benchmarks. Real-world latency depends on network stack and system load.
 
