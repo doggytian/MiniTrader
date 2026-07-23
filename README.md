@@ -35,18 +35,25 @@ Designed to demonstrate low-latency system design principles used in quantitativ
 | `network/` | epoll-based market data receiver | Edge-triggered, non-blocking IO, CPU affinity |
 | `risk/` | Inline risk gate (cancel rate, self-trade, position limit) | Zero-overhead abstraction, compile-time policy |
 
-## Build
+## Quick Start
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20
-cmake --build build -j$(nproc)
+./scripts/build.sh          # Build (Release by default)
+./scripts/run.sh            # Run the trading demo
+./scripts/test.sh           # Run all unit tests
+./scripts/bench.sh          # Run all benchmarks (with P99 histogram)
+./scripts/clean.sh          # Remove build directory
 ```
 
-## Benchmark
+Or manually:
 
 ```bash
-./build/bench/spsc_bench        # SPSC queue throughput & latency
-./build/bench/orderbook_bench   # OrderBook add/cancel/match
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+./build/minitrader_demo     # Run demo
+./build/test_spsc_queue     # SPSC queue tests
+./build/test_orderbook      # OrderBook tests
+./build/engine_bench        # Full-path latency benchmark
 ```
 
 <!-- TODO: Add flame graph screenshot here -->
