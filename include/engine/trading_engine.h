@@ -18,6 +18,7 @@ struct EngineConfig {
     OrderBookConfig book_config{.min_price = 1, .max_price = 100000, .tick_size = 1};
     RiskConfig      risk_config{};
     std::size_t     tick_queue_capacity{4096};  // informational only; queue size is fixed
+    bool            enable_latency_log{false};  // print per-tick on_tick() latency
 };
 
 /// TradingEngine — the central coordinator.
@@ -80,6 +81,13 @@ public:
     [[nodiscard]] uint64_t orders_rejected() const noexcept { return orders_rejected_; }
     [[nodiscard]] uint64_t fills_received() const noexcept { return fills_received_; }
 
+    /// Average on_tick() latency in nanoseconds (0 if no ticks processed).
+    [[nodiscard]] uint64_t latency_avg_ns() const noexcept {
+        return ticks_processed_ ? latency_sum_ns_ / ticks_processed_ : 0;
+    }
+    /// Peak on_tick() latency in nanoseconds.
+    [[nodiscard]] uint64_t latency_max_ns() const noexcept { return latency_max_ns_; }
+
     [[nodiscard]] const OrderBook& order_book() const noexcept { return book_; }
     [[nodiscard]] const RiskGate&  risk_gate()  const noexcept { return risk_; }
 
@@ -101,6 +109,10 @@ private:
     uint64_t orders_submitted_{0};
     uint64_t orders_rejected_{0};
     uint64_t fills_received_{0};
+
+    // Latency stats (on_tick wall-clock, nanoseconds)
+    uint64_t latency_sum_ns_{0};
+    uint64_t latency_max_ns_{0};
 };
 
 }  // namespace minitrader

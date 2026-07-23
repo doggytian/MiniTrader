@@ -15,11 +15,12 @@ int main() {
     EngineConfig eng_cfg;
     eng_cfg.book_config = {.min_price = 1, .max_price = 100000, .tick_size = 1};
     eng_cfg.risk_config = {
-        .max_position       = 500,
+        .max_position          = 500,
         .max_orders_per_second = 200,
-        .max_cancel_ratio   = 0.9,
-        .check_self_trade   = false,  // disabled: strategy trades with itself in demo
+        .max_cancel_ratio      = 0.9,
+        .check_self_trade      = false,
     };
+    eng_cfg.enable_latency_log = true;   // print per-tick latency
 
     TradingEngine engine(eng_cfg);
 
@@ -111,6 +112,11 @@ int main() {
                 static_cast<long long>(engine.order_book().best_bid()));
     std::printf("  best ask        : %lld\n",
                 static_cast<long long>(engine.order_book().best_ask()));
+    std::printf("\n── on_tick() latency (dequeue → strategy returned) ──\n");
+    std::printf("  avg : %llu ns\n",
+                static_cast<unsigned long long>(engine.latency_avg_ns()));
+    std::printf("  peak: %llu ns\n",
+                static_cast<unsigned long long>(engine.latency_max_ns()));
 
     return 0;
 }
