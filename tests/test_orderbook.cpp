@@ -73,6 +73,45 @@ TEST_F(OrderBookTest, MatchingPartialFill) {
     EXPECT_EQ(book->best_ask(), 150);
 }
 
+TEST_F(OrderBookTest, CancelOrderBasic) {
+    auto order = make_order(Side::Buy, 150, 10);
+    uint64_t id = order.order_id;
+    book->add_order(std::move(order));
+
+    EXPECT_EQ(book->best_bid(), 150);
+    EXPECT_TRUE(book->cancel_order(id));
+    EXPECT_EQ(book->quantity_at(150, Side::Buy), 0);
+    EXPECT_EQ(book->best_bid(), -1);  // Level now empty
+}
+
+TEST_F(OrderBookTest, CancelOrderUpdatesBestPrice) {
+    // Two bids at different prices — cancel the better one
+    auto o1 = make_order(Side::Buy, 155, 10);
+    auto o2 = make_order(Side::Buy, 150, 10);
+    uint64_t id1 = o1.order_id;
+    book->add_order(std::move(o1));
+    book->add_order(std::move(o2));
+
+    EXPECT_EQ(book->best_bid(), 155);
+    EXPECT_TRUE(book->cancel_order(id1));
+    EXPECT_EQ(book->best_bid(), 150);  // Falls back to next level
+}
+
+TEST_F(OrderBookTest, CancelOrderNotFound) {
+    EXPECT_FALSE(book->cancel_order(9999));  // Non-existent id
+}
+
+TEST_F(OrderBookTest, CancelAlreadyFilledOrder) {
+    auto ask = make_order(Side::Sell, 150, 5);
+    auto bid = make_order(Side::Buy,  150, 5);
+    uint64_t ask_id = ask.order_id;
+    book->add_order(std::move(ask));
+    book->add_order(std::move(bid));  // Fully fills the ask
+
+    // ask is gone from the book — cancel should return false
+    EXPECT_FALSE(book->cancel_order(ask_id));
+}
+
 TEST_F(OrderBookTest, PriceTimePriority) {
     // Two orders at same price — first in should be filled first
     book->add_order(make_order(Side::Sell, 150, 5));   // Order A

@@ -49,13 +49,17 @@ cmake --build build -j$(nproc)
 
 <!-- TODO: Add flame graph screenshot here -->
 
-## Performance (measured on Apple M1 Pro)
+## Performance (measured on Apple M1 Pro, Release build)
 
-| Metric | Value |
-|--------|-------|
-| SPSC enqueue-dequeue round-trip | ~15 ns |
-| OrderBook insert (single level) | ~25 ns |
-| Full path: market data → order out | < 200 ns |
+| Metric | Value | Notes |
+|--------|-------|-------|
+| SPSC enqueue-dequeue round-trip | **2.1 ns** | Single-threaded, int64_t payload |
+| SPSC round-trip (32-byte Order struct) | **2.5 ns** | |
+| SPSC throughput (burst 8) | **434 M ops/s** | |
+| OrderBook add\_order (single level) | **43 ns** | |
+| OrderBook cancel\_order (O(1) via map) | **24 ns** | unordered\_map lookup + list::erase |
+| OrderBook match (depth ≥ 10) | **~450 ns** | 1 incoming vs N resting, best price unchanged |
+| OrderBook match (depth = 1, best exhausted) | **~1.9 µs** | Triggers O(price\_range) best-price rescan |
 
 > Numbers above are single-threaded micro-benchmarks. Real-world latency depends on network stack and system load.
 

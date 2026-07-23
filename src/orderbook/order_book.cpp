@@ -31,12 +31,17 @@ void OrderBook::add_order(Order order) {
     if (order.quantity > 0 && order.type == OrderType::Limit) {
         const auto idx = price_to_index(order.price);
         if (order.side == Side::Buy) {
-            bids_[idx].add_order(std::move(order));
+            auto& level = bids_[idx];
+            level.add_order(order);  // copy: we need order_id below
+            // Register location for O(1) cancel
+            order_map_[order.order_id] = {Side::Buy, idx, std::prev(level.orders.end())};
             if (best_bid_ < 0 || order.price > best_bid_) {
                 best_bid_ = order.price;
             }
         } else {
-            asks_[idx].add_order(std::move(order));
+            auto& level = asks_[idx];
+            level.add_order(order);
+            order_map_[order.order_id] = {Side::Sell, idx, std::prev(level.orders.end())};
             if (best_ask_ < 0 || order.price < best_ask_) {
                 best_ask_ = order.price;
             }
@@ -45,10 +50,33 @@ void OrderBook::add_order(Order order) {
 }
 
 bool OrderBook::cancel_order(uint64_t order_id) {
-    // TODO: Implement O(1) cancel via order_id -> location map
-    // For now, linear scan (acceptable for MVP, optimize later)
-    (void)order_id;
-    return false;
+    auto map_it = order_map_.find(order_id);
+    if (map_it == order_map_.end()) {
+        return false;  // Order not found (already filled or never existed)
+    }
+
+    // Copy location fields before erasing the map entry (erasing invalidates
+    // the reference into the map node).
+    const OrderLocation loc = map_it->second;
+    order_map_.erase(map_it);
+
+    auto& level = (loc.side == Side::Buy) ? bids_[loc.price_idx] : asks_[loc.price_idx];
+
+    // O(1) erase from std::list via cached iterator
+    level.erase(loc.it);
+
+    // Update best price if the cancelled order was at the best level
+    if (loc.side == Side::Buy) {
+        if (level.empty() && level.price == best_bid_) {
+            update_best_bid_after_empty(loc.price_idx);
+        }
+    } else {
+        if (level.empty() && level.price == best_ask_) {
+            update_best_ask_after_empty(loc.price_idx);
+        }
+    }
+
+    return true;
 }
 
 int64_t OrderBook::best_bid() const noexcept {
@@ -89,21 +117,16 @@ void OrderBook::match(Order& incoming) {
 
                 incoming.quantity -= fill_qty;
                 if (fill_qty >= resting.quantity) {
+                    // Fully filled: remove from map and level
+                    order_map_.erase(resting.order_id);
                     level.remove_front();
                 } else {
                     level.reduce_front(fill_qty);
                 }
             }
 
-            // Update best ask if level is exhausted
             if (level.empty()) {
-                best_ask_ = -1;
-                for (auto i = idx + 1; i < asks_.size(); ++i) {
-                    if (!asks_[i].empty()) {
-                        best_ask_ = asks_[i].price;
-                        break;
-                    }
-                }
+                update_best_ask_after_empty(idx);
             }
         }
     } else {
@@ -123,21 +146,15 @@ void OrderBook::match(Order& incoming) {
 
                 incoming.quantity -= fill_qty;
                 if (fill_qty >= resting.quantity) {
+                    order_map_.erase(resting.order_id);
                     level.remove_front();
                 } else {
                     level.reduce_front(fill_qty);
                 }
             }
 
-            // Update best bid if level is exhausted
             if (level.empty()) {
-                best_bid_ = -1;
-                for (int i = static_cast<int>(idx) - 1; i >= 0; --i) {
-                    if (!bids_[static_cast<std::size_t>(i)].empty()) {
-                        best_bid_ = bids_[static_cast<std::size_t>(i)].price;
-                        break;
-                    }
-                }
+                update_best_bid_after_empty(idx);
             }
         }
     }
@@ -146,6 +163,27 @@ void OrderBook::match(Order& incoming) {
 void OrderBook::emit_fill(const ExecutionReport& report) {
     if (fill_callback_) {
         fill_callback_(report);
+    }
+}
+
+void OrderBook::update_best_bid_after_empty(std::size_t exhausted_idx) noexcept {
+    best_bid_ = -1;
+    for (int i = static_cast<int>(exhausted_idx) - 1; i >= 0; --i) {
+        auto& b = bids_[static_cast<std::size_t>(i)];
+        if (!b.empty()) {
+            best_bid_ = b.price;
+            break;
+        }
+    }
+}
+
+void OrderBook::update_best_ask_after_empty(std::size_t exhausted_idx) noexcept {
+    best_ask_ = -1;
+    for (auto i = exhausted_idx + 1; i < asks_.size(); ++i) {
+        if (!asks_[i].empty()) {
+            best_ask_ = asks_[i].price;
+            break;
+        }
     }
 }
 
