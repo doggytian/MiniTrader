@@ -1,0 +1,198 @@
+Analysis of sampling engine_bench (pid 59099) every 1 millisecond
+Process:         engine_bench [59099]
+Path:            /Users/USER/*/engine_bench
+Load Address:    0x100324000
+Identifier:      engine_bench
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [59070]
+Target Type:     live task
+
+Date/Time:       2026-07-23 14:01:05.742 +0800
+Launch Time:     2026-07-23 14:01:04.703 +0800
+OS Version:      macOS 26.5.2 (25F84)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         10.0M
+Physical footprint (peak):  10.0M
+Idle exit:                  untracked
+----
+
+Call graph:
+    2568 Thread_18439590   DispatchQueue_1: com.apple.main-thread  (serial)
+      2568 start  (in dyld) + 6992  [0x1824bfe00]
+        2568 main  (in engine_bench) + 140  [0x100326098]
+          2568 benchmark::RunSpecifiedBenchmarks()  (in engine_bench) + 92  [0x100328274]
+            2253 benchmark::RunSpecifiedBenchmarks(benchmark::BenchmarkReporter*, benchmark::BenchmarkReporter*, std::basic_string<char>)  (in engine_bench) + 1776  [0x1003289a8]
+            + 2253 benchmark::internal::BenchmarkRunner::DoOneRepetition()  (in engine_bench) + 156  [0x10033d6e0]
+            +   2253 benchmark::internal::BenchmarkRunner::DoNIterations()  (in engine_bench) + 432  [0x10033c9a4]
+            +     2253 benchmark::internal::(anonymous namespace)::ThreadRunnerDefault::RunThreads(std::function<void (int)> const&)  (in engine_bench) + 148  [0x10033dd50]
+            +       2253 benchmark::internal::(anonymous namespace)::RunInThread(benchmark::internal::BenchmarkInstance const*, long long, int, benchmark::internal::ThreadManager*, benchmark::internal::PerfCountersMeasurement*, benchmark::ProfilerManager*)  (in engine_bench) + 96  [0x10033d38c]
+            +         2253 benchmark::internal::BenchmarkInstance::Run(long long, int, benchmark::internal::ThreadTimer*, benchmark::internal::ThreadManager*, benchmark::internal::PerfCountersMeasurement*, benchmark::ProfilerManager*) const  (in engine_bench) + 176  [0x10032e184]
+            +           860 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 604  [0x100325aec]
+            +           ! 470 minitrader::TradingEngine::run_once()  (in engine_bench) + 184  [0x100326bc0]
+            +           ! : 470 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+            +           ! :   458 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+            +           ! :   | 442 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+            +           ! :   | + 442 mach_continuous_time  (in libsystem_kernel.dylib) + 96,100,...  [0x18283a084,0x18283a088,...]
+            +           ! :   | 10 clock_gettime_nsec_np  (in libsystem_c.dylib) + 316,12,...  [0x18270d118,0x18270cfe8,...]
+            +           ! :   | 5 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+            +           ! :   | + 5 mach_timebase_info  (in libsystem_kernel.dylib) + 4,8  [0x182839fd0,0x182839fd4]
+            +           ! :   | 1 mach_timebase_info  (in libsystem_kernel.dylib) + 84  [0x18283a020]
+            +           ! :   7 clock_gettime  (in libsystem_c.dylib) + 92,416  [0x18271ad80,0x18271aec4]
+            +           ! :   5 DYLD-STUB$$clock_gettime  (in libc++.1.dylib) + 8,0  [0x1827f2510,0x1827f2508]
+            +           ! 338 minitrader::TradingEngine::run_once()  (in engine_bench) + 216  [0x100326be0]
+            +           ! : 337 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+            +           ! : | 326 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+            +           ! : | + 310 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+            +           ! : | + ! 305 mach_continuous_time  (in libsystem_kernel.dylib) + 96,100  [0x18283a084,0x18283a088]
+            +           ! : | + ! 5 DYLD-STUB$$mach_continuous_time  (in libsystem_c.dylib) + 0  [0x18278587c]
+            +           ! : | + 14 clock_gettime_nsec_np  (in libsystem_c.dylib) + 228,40,...  [0x18270d0c0,0x18270d004,...]
+            +           ! : | + 2 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+            +           ! : | +   2 mach_timebase_info  (in libsystem_kernel.dylib) + 60  [0x18283a008]
+            +           ! : | 11 clock_gettime  (in libsystem_c.dylib) + 92,8,...  [0x18271ad80,0x18271ad2c,...]
+            +           ! : 1 DYLD-STUB$$std::chrono::steady_clock::now()  (in engine_bench) + 0  [0x10034ba28]
+            +           ! 39 minitrader::TradingEngine::run_once()  (in engine_bench) + 212,160,...  [0x100326bdc,0x100326ba8,...]
+            +           ! 6 minitrader::TradingEngine::run_once()  (in engine_bench) + 212  [0x100326bdc]
+            +           ! : 6 minitrader::SpreadStrategy::on_tick(minitrader::MarketTick const&)  (in engine_bench) + 24  [0x100327158]
+            +           ! 5 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 56  [0x18279270c]
+            +           ! 2 minitrader::SpreadStrategy::on_tick(minitrader::MarketTick const&)  (in engine_bench) + 80  [0x100327190]
+            +           360 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 608  [0x100325af0]
+            +           ! 351 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+            +           ! : 341 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+            +           ! : | 325 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+            +           ! : | + 320 mach_continuous_time  (in libsystem_kernel.dylib) + 96,100,...  [0x18283a084,0x18283a088,...]
+            +           ! : | + 5 DYLD-STUB$$mach_continuous_time  (in libsystem_c.dylib) + 12,8  [0x182785888,0x182785884]
+            +           ! : | 16 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+            +           ! : |   11 mach_timebase_info  (in libsystem_kernel.dylib) + 76,72  [0x18283a018,0x18283a014]
+            +           ! : |   5 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 8,0  [0x1827858c4,0x1827858bc]
+            +           ! : 10 clock_gettime  (in libsystem_c.dylib) + 92,32,...  [0x18271ad80,0x18271ad44,...]
+            +           ! 9 DYLD-STUB$$std::chrono::steady_clock::now()  (in engine_bench) + 4  [0x10034ba2c]
+            +           341 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 540  [0x100325aac]
+            +           ! 339 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+            +           ! : 329 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+            +           ! : | 311 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+            +           ! : | + 311 mach_continuous_time  (in libsystem_kernel.dylib) + 96,100,...  [0x18283a084,0x18283a088,...]
+            +           ! : | 7 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+            +           ! : | + 5 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 12  [0x1827858c8]
+            +           ! : | + 2 mach_timebase_info  (in libsystem_kernel.dylib) + 0  [0x182839fcc]
+            +           ! : | 7 clock_gettime_nsec_np  (in libsystem_c.dylib) + 4,8,...  [0x18270cfe0,0x18270cfe4,...]
+            +           ! : | 4 mach_timebase_info  (in libsystem_kernel.dylib) + 80,84  [0x18283a01c,0x18283a020]
+            +           ! : 7 clock_gettime  (in libsystem_c.dylib) + 56,64,...  [0x18271ad5c,0x18271ad64,...]
+            +           ! : 3 DYLD-STUB$$clock_gettime  (in libc++.1.dylib) + 0  [0x1827f2508]
+            +           ! 2 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 8  [0x1827926dc]
+            +           336 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 572  [0x100325acc]
+            +           ! 328 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+            +           ! : 314 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+            +           ! : | 303 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+            +           ! : | + 297 mach_continuous_time  (in libsystem_kernel.dylib) + 96,100  [0x18283a084,0x18283a088]
+            +           ! : | + 6 DYLD-STUB$$mach_continuous_time  (in libsystem_c.dylib) + 12  [0x182785888]
+            +           ! : | 10 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+            +           ! : | + 6 DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib) + 8,0,...  [0x1827858c4,0x1827858bc,...]
+            +           ! : | + 4 mach_timebase_info  (in libsystem_kernel.dylib) + 0,28,...  [0x182839fcc,0x182839fe8,...]
+            +           ! : | 1 mach_timebase_info  (in libsystem_kernel.dylib) + 80  [0x18283a01c]
+            +           ! : 14 clock_gettime  (in libsystem_c.dylib) + 64,92,...  [0x18271ad64,0x18271ad80,...]
+            +           ! 5 DYLD-STUB$$std::chrono::steady_clock::now()  (in engine_bench) + 4  [0x10034ba2c]
+            +           ! 3 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 0  [0x1827926d4]
+            +           322 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 580  [0x100325ad4]
+            +           ! 322 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+            +           !   309 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+            +           !   : 289 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+            +           !   : | 289 mach_continuous_time  (in libsystem_kernel.dylib) + 96,100  [0x18283a084,0x18283a088]
+            +           !   : 12 clock_gettime_nsec_np  (in libsystem_c.dylib) + 28,40,...  [0x18270cff8,0x18270d004,...]
+            +           !   : 8 clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+            +           !   :   8 mach_timebase_info  (in libsystem_kernel.dylib) + 8,60,...  [0x182839fd4,0x18283a008,...]
+            +           !   12 clock_gettime  (in libsystem_c.dylib) + 92,8  [0x18271ad80,0x18271ad2c]
+            +           !   1 DYLD-STUB$$clock_gettime  (in libc++.1.dylib) + 12  [0x1827f2514]
+            +           12 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 56  [0x18279270c]
+            +           11 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 540,608,...  [0x100325aac,0x100325af0,...]
+            +           9 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 596  [0x100325ae4]
+            +           ! 9 minitrader::TradingEngine::push_tick(minitrader::MarketTick const&)  (in engine_bench) + 40,56,...  [0x100326aec,0x100326afc,...]
+            +           2 BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench) + 184  [0x100325948]
+            +             2 minitrader::TradingEngine::TradingEngine(minitrader::EngineConfig)  (in engine_bench) + 84  [0x1003268dc]
+            +               2 minitrader::OrderBook::OrderBook(minitrader::OrderBookConfig)  (in engine_bench) + 140  [0x100349468]
+            +                 2 std::vector<minitrader::PriceLevel>::__append(unsigned long)  (in engine_bench) + 288,296  [0x10034a358,0x10034a360]
+            315 benchmark::RunSpecifiedBenchmarks(benchmark::BenchmarkReporter*, benchmark::BenchmarkReporter*, std::basic_string<char>)  (in engine_bench) + 880  [0x100328628]
+              315 <deduplicated_symbol>  (in engine_bench) + 20  [0x100346064]
+                315 benchmark::CPUInfo::Get()  (in engine_bench) + 80  [0x100347a08]
+                  314 benchmark::CPUInfo::CPUInfo()  (in engine_bench) + 944,952,...  [0x100347df8,0x100347e00,...]
+                  1 benchmark::CPUInfo::CPUInfo()  (in engine_bench) + 1004  [0x100347e34]
+                    1 std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+                      1 clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+                        1 clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+                          1 mach_continuous_time  (in libsystem_kernel.dylib) + 96  [0x18283a084]
+
+Total number in stack (recursive counted multiple, when >=5):
+        9       mach_timebase_info  (in libsystem_kernel.dylib) + 0  [0x182839fcc]
+        7       clock_gettime  (in libsystem_c.dylib) + 60  [0x18271ad60]
+        7       clock_gettime_nsec_np  (in libsystem_c.dylib) + 400  [0x18270d16c]
+        7       mach_continuous_time  (in libsystem_kernel.dylib) + 0  [0x18283a024]
+        7       std::chrono::steady_clock::now()  (in libc++.1.dylib) + 28  [0x1827926f0]
+        6       clock_gettime  (in libsystem_c.dylib) + 0  [0x18271ad24]
+        6       clock_gettime_nsec_np  (in libsystem_c.dylib) + 240  [0x18270d0cc]
+
+Sort by top of stack, same collapsed (when >= 5):
+        mach_continuous_time  (in libsystem_kernel.dylib)        1965
+        benchmark::CPUInfo::CPUInfo()  (in engine_bench)        314
+        clock_gettime  (in libsystem_c.dylib)        61
+        clock_gettime_nsec_np  (in libsystem_c.dylib)        43
+        minitrader::TradingEngine::run_once()  (in engine_bench)        39
+        mach_timebase_info  (in libsystem_kernel.dylib)        38
+        std::chrono::steady_clock::now()  (in libc++.1.dylib)        22
+        DYLD-STUB$$mach_continuous_time  (in libsystem_c.dylib)        16
+        DYLD-STUB$$mach_timebase_info  (in libsystem_c.dylib)        16
+        DYLD-STUB$$std::chrono::steady_clock::now()  (in engine_bench)        15
+        BM_EngineLatencyHistogram(benchmark::State&)  (in engine_bench)        11
+        DYLD-STUB$$clock_gettime  (in libc++.1.dylib)        9
+        minitrader::TradingEngine::push_tick(minitrader::MarketTick const&)  (in engine_bench)        9
+        minitrader::SpreadStrategy::on_tick(minitrader::MarketTick const&)  (in engine_bench)        8
+
+Binary Images:
+       0x100324000 -        0x10035171f +engine_bench (0) <980BD8C2-DDF3-3348-97BE-C39217C99ED1> /Users/*/engine_bench
+       0x182418000 -        0x18246ab4b  libobjc.A.dylib (951.7) <FF1D8AE4-ABEF-35F1-A30A-1183B9CB414F> /usr/lib/libobjc.A.dylib
+       0x18246b000 -        0x18249fd07  libdyld.dylib (1378) <B147D877-D0C2-388F-B38D-D3132E39905F> /usr/lib/system/libdyld.dylib
+       0x1824a0000 -        0x182546217  dyld (1.0.0 - 1378) <F924BDD3-4365-3466-9580-8B1B3FA8F857> /usr/lib/dyld
+       0x182547000 -        0x18254a228  libsystem_blocks.dylib (96) <CC947089-488D-316B-A9C7-46DEC0F73145> /usr/lib/system/libsystem_blocks.dylib
+       0x18254b000 -        0x18259f55f  libxpc.dylib (3102.120.13) <C40FCAE8-7A17-3D82-87CB-3DA4802ADEF1> /usr/lib/system/libxpc.dylib
+       0x1825a0000 -        0x1825c09ff  libsystem_trace.dylib (1861.120.4) <D0FABAB3-5AE7-3F10-8C62-60CBF5D70850> /usr/lib/system/libsystem_trace.dylib
+       0x1825c1000 -        0x18266f5f7  libcorecrypto.dylib (1922.121.1) <A01A158D-6FE7-3B1C-A2C4-6BCB90D7314A> /usr/lib/system/libcorecrypto.dylib
+       0x182670000 -        0x1826c01d7  libsystem_malloc.dylib (812.100.31) <5FAE4807-4D2B-3A95-A63A-DD96D3DA11B4> /usr/lib/system/libsystem_malloc.dylib
+       0x1826c1000 -        0x18270823f  libdispatch.dylib (1542.100.32) <F071EFE4-299F-3089-ACC4-0025B8FFB52A> /usr/lib/system/libdispatch.dylib
+       0x182709000 -        0x18270bffb  libsystem_featureflags.dylib (103) <71FCFFBD-85F8-3365-AFE0-BECEA4369122> /usr/lib/system/libsystem_featureflags.dylib
+       0x18270c000 -        0x18278cd9f  libsystem_c.dylib (1752.120.2) <694B7881-1BF3-3D0F-8F19-B50AE4E8EF8A> /usr/lib/system/libsystem_c.dylib
+       0x18278d000 -        0x18281dae7  libc++.1.dylib (2100.43) <5013C0F8-84A9-3B56-9FEB-C353816A750F> /usr/lib/libc++.1.dylib
+       0x18281e000 -        0x18283875f  libc++abi.dylib (2100.43) <E482D257-E5A0-3816-BD97-7B39342958DA> /usr/lib/libc++abi.dylib
+       0x182839000 -        0x1828762af  libsystem_kernel.dylib (12377.121.10) <FCA53B98-3D6A-38B2-A0EC-DF0F7E05F171> /usr/lib/system/libsystem_kernel.dylib
+       0x182877000 -        0x182883b3b  libsystem_pthread.dylib (539.100.4) <4F33683C-18C8-39A1-800B-2E3BD43BCC13> /usr/lib/system/libsystem_pthread.dylib
+       0x182884000 -        0x18288c963  libsystem_platform.dylib (375.120.2) <160FD864-8D15-36FC-9E97-9725388CFAFE> /usr/lib/system/libsystem_platform.dylib
+       0x18288d000 -        0x1828bc6eb  libsystem_info.dylib (600) <3D62F2D9-F516-31BF-83C7-E203D872300B> /usr/lib/system/libsystem_info.dylib
+       0x186854000 -        0x18685de5f  libsystem_darwin.dylib (1752.120.2) <8858F025-745A-388E-9544-080781CC9A69> /usr/lib/system/libsystem_darwin.dylib
+       0x186cbf000 -        0x186cd11b6  libsystem_notify.dylib (348.120.4) <64D76451-1E0C-369B-A631-54DA3140E083> /usr/lib/system/libsystem_notify.dylib
+       0x188f8c000 -        0x188fa6f7b  libsystem_networkextension.dylib (2226.121.1) <0331EE20-A1FB-3C0D-990A-F65939CFF505> /usr/lib/system/libsystem_networkextension.dylib
+       0x189029000 -        0x189040fdf  libsystem_asl.dylib (406) <F40838DF-2F15-3F62-970F-DEE25706BF1B> /usr/lib/system/libsystem_asl.dylib
+       0x18abe7000 -        0x18abef387  libsystem_symptoms.dylib (2169.120.7) <F5029F5C-1BF3-31C7-892E-BC8606AC829E> /usr/lib/system/libsystem_symptoms.dylib
+       0x18ee8b000 -        0x18eec3257  libsystem_containermanager.dylib (725.120.2) <518BE44D-AA31-31E6-B44B-A37AD5E47040> /usr/lib/system/libsystem_containermanager.dylib
+       0x19029c000 -        0x1902a05d7  libsystem_configuration.dylib (1405.120.5) <0F7BBC1C-3D50-3E59-A31F-E4672A80BCEB> /usr/lib/system/libsystem_configuration.dylib
+       0x1902a1000 -        0x1902a78cf  libsystem_sandbox.dylib (2680.120.12) <EC3A75EA-44C0-3A0B-9BF7-71C117B0A9C6> /usr/lib/system/libsystem_sandbox.dylib
+       0x1918fb000 -        0x1918fe1fb  libquarantine.dylib (196.120.2) <5849009B-ACA3-3796-94C4-BBDF8D300EBA> /usr/lib/system/libquarantine.dylib
+       0x19209a000 -        0x1920a0d03  libsystem_coreservices.dylib (191.4.5) <9576143B-C303-35A3-BA63-1FD06EDA2BB1> /usr/lib/system/libsystem_coreservices.dylib
+       0x192625000 -        0x192662a77  libsystem_m.dylib (3312.100.1) <A7E0863C-101A-31A0-922B-ED9B02626151> /usr/lib/system/libsystem_m.dylib
+       0x192664000 -        0x192667527  libmacho.dylib (1378) <755441B4-C034-3E3A-8E3C-F424FBB28261> /usr/lib/system/libmacho.dylib
+       0x192681000 -        0x19268e3a7  libcommonCrypto.dylib (600035) <CE357BB1-2D49-37CC-9FFE-D093936B1475> /usr/lib/system/libcommonCrypto.dylib
+       0x19268f000 -        0x192698ca3  libunwind.dylib (2100.2) <FC8F0C4E-6FB0-3E27-ABEF-B0FA720CD5E4> /usr/lib/system/libunwind.dylib
+       0x1926a1000 -        0x1926ab7ff  libcopyfile.dylib (240) <8ACFAC7A-88E9-3EF4-853F-A9140FF110E5> /usr/lib/system/libcopyfile.dylib
+       0x1926ac000 -        0x1926af987  libcompiler_rt.dylib (103.3) <AA79151F-C19D-3C7C-92F8-B10F04D82C1C> /usr/lib/system/libcompiler_rt.dylib
+       0x1926b0000 -        0x1926b478b  libsystem_collections.dylib (1752.120.2) <72DB5BE7-EF78-37D0-8AAD-53E37CFE4287> /usr/lib/system/libsystem_collections.dylib
+       0x1926b5000 -        0x1926b84cf  libsystem_secinit.dylib (168.100.7) <E525C566-CDA4-3D99-B12B-1615FD54A1F3> /usr/lib/system/libsystem_secinit.dylib
+       0x1926b9000 -        0x1926bbbf7  libremovefile.dylib (85.100.6) <635E661D-80A7-340D-A165-3F7D318FDFC9> /usr/lib/system/libremovefile.dylib
+       0x1926bc000 -        0x1926bcf27  libkeymgr.dylib (31) <8C08891A-DF1C-3DCC-AB64-4742FD6BE9BA> /usr/lib/system/libkeymgr.dylib
+       0x1926bd000 -        0x1926c5e37  libsystem_dnssd.dylib (2881.120.11) <6F45DF3F-233B-3BC3-BA8C-B43E7DA884BF> /usr/lib/system/libsystem_dnssd.dylib
+       0x1926c6000 -        0x1926cb09b  libcache.dylib (95) <189B576E-6176-3F82-8FA4-5914B0BEAEE7> /usr/lib/system/libcache.dylib
+       0x1926cc000 -        0x1926cdce3  libSystem.B.dylib (1356) <BA6A669A-3BB9-3BC7-85E8-8F0C1E68351E> /usr/lib/libSystem.B.dylib
+       0x285988000 -        0x28598f349  libRosetta.dylib (367.9) <8651ED4F-6506-3788-B56B-32EE414A85CA> /usr/lib/libRosetta.dylib
+       0x2875a5000 -        0x2875a8a4b  libsystem_darwindirectory.dylib (122) <CF277A2C-C818-3F16-8B3F-3C7B39FCD164> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x2875a9000 -        0x2875b25d3  libsystem_eligibility.dylib (319.121.1) <DDAC0531-0262-3DDC-8EC8-80EB9438847A> /usr/lib/system/libsystem_eligibility.dylib
+       0x2875b3000 -        0x2875ba88b  libsystem_sanitizers.dylib (26.1) <44C4234F-8B2D-38D3-A774-B4B3C75AF3A7> /usr/lib/system/libsystem_sanitizers.dylib
+       0x2875bb000 -        0x2875bbbb7  libsystem_trial.dylib (474.2.18.2) <68C583BA-AFF5-3916-86AE-6E38BFEF98D6> /usr/lib/system/libsystem_trial.dylib

@@ -66,10 +66,15 @@ void TradingEngine::submit_order(Order order) {
     const RiskResult result = risk_.check(order);
     if (result != RiskResult::Pass) { ++orders_rejected_; return; }
     ++orders_submitted_;
+    // Track for self-trade detection before inserting into the book
+    if (order.type == OrderType::Limit) {
+        risk_.track_order(order);
+    }
     book_.add_order(std::move(order));
 }
 
 void TradingEngine::cancel_order(uint64_t order_id) {
+    risk_.untrack_order(order_id);
     book_.cancel_order(order_id);
 }
 
@@ -79,6 +84,10 @@ int32_t TradingEngine::position(uint64_t instrument_id) const noexcept {
 
 void TradingEngine::on_fill(const ExecutionReport& report) {
     risk_.on_fill(report);
+    // Maker's resting order was consumed — remove from self-trade tracker
+    if (report.is_maker) {
+        risk_.untrack_order(report.order_id);
+    }
     ++fills_received_;
     if (strategy_) strategy_->on_fill(report);
 }

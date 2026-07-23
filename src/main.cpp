@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstdint>
+#include <tuple>
 #include <thread>
 #include <chrono>
 
@@ -76,8 +77,8 @@ int main() {
             .local_timestamp_ns    = Order::now_ns(),
         };
 
-        engine.push_tick(tick);
-        engine.run_once();
+        std::ignore = engine.push_tick(tick);
+        std::ignore = engine.run_once();
 
         // After tick 2: external aggressive sell hits our resting bid
         // After tick 8: external aggressive buy hits our resting ask

@@ -77,6 +77,14 @@ cmake --build build --parallel
 |-----|-----|-----|-------|-----|
 | 83 ns | 84 ns | 125 ns | 167 ns | ~14 µs |
 
+> **Profiling note**: `sample`-based call-graph analysis (`docs/engine_sample_profile.txt`)
+> shows that ~80% of measured time in the histogram benchmark is spent inside
+> `steady_clock::now()` → `mach_continuous_time` (the measurement overhead itself).
+> The actual business logic (`on_tick` + SPSC dequeue) is only ~6 ns per iteration,
+> consistent with the `BM_EngineTickNoOrder` result of **65 ns** (which includes
+> two `steady_clock::now()` calls in `run_once()`).
+> Tail latency spikes to ~14 µs are OS scheduling jitter, not application logic.
+
 > Numbers above are single-threaded micro-benchmarks. Real-world latency depends on network stack and system load.
 
 ## Project Structure
