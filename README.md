@@ -1,6 +1,6 @@
 # MiniTrader
 
-[![CI](https://github.com/tianxingyu/MiniTrader/actions/workflows/ci.yml/badge.svg)](https://github.com/tianxingyu/MiniTrader/actions/workflows/ci.yml)
+[![CI](https://github.com/doggytian/MiniTrader/actions/workflows/ci.yml/badge.svg)](https://github.com/doggytian/MiniTrader/actions/workflows/ci.yml)
 
 A minimal, high-performance trading system built from scratch in modern C++20.  
 Designed to demonstrate low-latency system design principles used in quantitative trading.
