@@ -31,8 +31,24 @@ target_link_libraries(minitrader_orderbook PUBLIC minitrader_core)
 # Strategy library
 add_library(minitrader_strategy
     src/strategy/strategy_base.cpp
+    src/strategy/spread_strategy.cpp
 )
 target_link_libraries(minitrader_strategy PUBLIC minitrader_core minitrader_orderbook)
+
+# Engine library
+add_library(minitrader_engine
+    src/engine/trading_engine.cpp
+)
+target_link_libraries(minitrader_engine PUBLIC
+    minitrader_core
+    minitrader_orderbook
+    minitrader_risk
+    minitrader_strategy
+)
+
+# Demo executable
+add_executable(minitrader_demo src/main.cpp)
+target_link_libraries(minitrader_demo PRIVATE minitrader_engine minitrader_strategy)
 
 # Network library (Linux only - epoll)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

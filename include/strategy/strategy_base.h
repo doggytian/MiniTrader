@@ -5,6 +5,9 @@
 
 namespace minitrader {
 
+// Forward declaration to avoid circular include
+class TradingEngine;
+
 /// Market data tick event.
 struct MarketTick {
     uint64_t instrument_id;
@@ -14,15 +17,16 @@ struct MarketTick {
     int32_t  ask_size;
     int64_t  last_price;
     int32_t  last_size;
-    uint64_t exchange_timestamp_ns;  // Exchange timestamp
-    uint64_t local_timestamp_ns;     // Local receive timestamp
+    uint64_t exchange_timestamp_ns;
+    uint64_t local_timestamp_ns;
 };
 
 /// Abstract strategy base class (Template Method pattern).
 ///
 /// Derived strategies implement on_tick() and on_fill().
-/// The framework handles data routing, backtesting vs. live mode switching,
-/// and order submission — strategy code is identical in both modes.
+/// The framework handles order routing and risk checks transparently —
+/// strategy code calls submit_order() / cancel_order() / position() and
+/// never touches OrderBook or RiskGate directly.
 class StrategyBase {
 public:
     virtual ~StrategyBase() = default;
@@ -30,34 +34,32 @@ public:
     /// Called on each market data update.
     virtual void on_tick(const MarketTick& tick) = 0;
 
-    /// Called when an order is filled.
+    /// Called when an order is filled (either maker or taker side).
     virtual void on_fill(const ExecutionReport& report) = 0;
 
-    /// Called once at strategy start (initialize state).
+    /// Called once before the first tick (initialize state, pre-load data).
     virtual void on_start() {}
 
-    /// Called once at strategy stop (cleanup).
+    /// Called once after the last tick (cleanup, report PnL).
     virtual void on_stop() {}
 
-    /// Get strategy name (for logging/identification).
+    /// Strategy name used for logging.
     [[nodiscard]] virtual std::string name() const = 0;
 
 protected:
-    /// Submit a new order (routed through risk gate).
-    /// In backtest mode, this goes to the simulated matching engine.
-    /// In live mode, this goes to the real exchange gateway.
+    /// Submit a new order.  Routes through RiskGate → OrderBook.
+    /// Rejected orders are silently dropped (check engine diagnostics).
     void submit_order(Order order);
 
-    /// Cancel an existing order.
+    /// Cancel a resting order by id.
     void cancel_order(uint64_t order_id);
 
-    /// Get current position for an instrument.
+    /// Net position for an instrument (positive = long, negative = short).
     [[nodiscard]] int32_t position(uint64_t instrument_id) const;
 
 private:
-    // Framework internals (order routing, mode switching)
-    // Implemented in strategy_base.cpp
     friend class TradingEngine;
+    TradingEngine* engine_{nullptr};  // injected by TradingEngine::set_strategy()
 };
 
 }  // namespace minitrader
