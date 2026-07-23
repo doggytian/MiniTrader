@@ -13,79 +13,79 @@
 
 namespace minitrader {
 
-/// Configuration for TradingEngine.
+/// 交易引擎配置。
 struct EngineConfig {
     OrderBookConfig book_config{.min_price = 1, .max_price = 100000, .tick_size = 1};
     RiskConfig      risk_config{};
-    std::size_t     tick_queue_capacity{4096};  // informational only; queue size is fixed
-    bool            enable_latency_log{false};  // print per-tick on_tick() latency
+    std::size_t     tick_queue_capacity{4096};  // 仅供参考，队列容量由 kQueueCap 固定
+    bool            enable_latency_log{false};  // 是否打印每个 tick 的 on_tick() 耗时
 };
 
-/// TradingEngine — the central coordinator.
+/// 交易引擎 — 全链路协调中枢。
 ///
-/// Wiring:
-///   MarketTick --> [SPSC queue] --> TradingEngine::run_once()
-///                                       --> strategy.on_tick()
-///                                           --> strategy.submit_order()
-///                                               --> RiskGate.check()
-///                                                   --> OrderBook.add_order()
-///                                                       --> fill_callback
-///                                                           --> strategy.on_fill()
+/// 数据流：
+///   MarketTick --> [SPSC 队列] --> run_once()
+///                                     --> strategy.on_tick()
+///                                         --> strategy.submit_order()
+///                                             --> RiskGate.check()
+///                                                 --> OrderBook.add_order()
+///                                                     --> fill_callback
+///                                                         --> strategy.on_fill()
 ///
-/// Thread model (single-threaded demo):
-///   - push_tick()  called by producer (market data thread or test harness)
-///   - run_once() / run() called by consumer (strategy thread)
-///   Both sides communicate via SPSCQueue — zero mutex in the hot path.
+/// 线程模型（单线程 demo）：
+///   - push_tick()：生产者侧调用（行情线程或测试驱动）
+///   - run_once() / run()：消费者侧调用（策略线程）
+///   两侧通过 SPSCQueue 通信，热路径零 mutex。
 class TradingEngine {
 public:
-    static constexpr std::size_t kQueueCap = 4096;  // must be power of 2
+    static constexpr std::size_t kQueueCap = 4096;  // 必须为 2 的幂
 
     explicit TradingEngine(EngineConfig config = {});
 
-    // Non-copyable
+    // 不可拷贝
     TradingEngine(const TradingEngine&) = delete;
     TradingEngine& operator=(const TradingEngine&) = delete;
 
-    /// Attach a strategy. Must be called before run()/run_once().
-    /// The engine injects itself into the strategy so that submit_order()
-    /// and cancel_order() route through the risk gate and order book.
+    /// 绑定策略，必须在 run()/run_once() 之前调用。
+    /// 引擎会将自身指针注入策略，使 submit_order/cancel_order/position
+    /// 的调用自动经过风控和撮合簿路由。
     void set_strategy(StrategyBase* strategy);
 
-    /// Enqueue a market tick (producer side, lock-free).
-    /// @return false if queue is full (tick dropped).
+    /// 入队一个行情 tick（生产者侧，无锁）。
+    /// @return 队列已满（tick 被丢弃）时返回 false。
     [[nodiscard]] bool push_tick(const MarketTick& tick) noexcept;
 
-    /// Drain all pending ticks and process them synchronously (consumer side).
-    /// Returns the number of ticks processed.
+    /// 同步处理队列中所有待处理 tick（消费者侧）。
+    /// 返回本次处理的 tick 数量。
     std::size_t run_once();
 
-    /// Run until stop() is called (blocking loop, consumer side).
+    /// 阻塞运行直到 stop() 被调用（消费者侧）。
     void run();
 
-    /// Signal the run() loop to exit.
+    /// 通知 run() 循环退出（线程安全）。
     void stop() noexcept;
 
-    // ─── Called by StrategyBase (friend) ────────────────────────────────────
-    /// Submit an order through risk gate → order book.
+    // ─── 供 StrategyBase 调用（friend）────────────────────────
+    /// 经风控网关 → 撮合簿提交订单。
     void submit_order(Order order);
 
-    /// Cancel a resting order.
+    /// 撤销一笔挂单。
     void cancel_order(uint64_t order_id);
 
-    /// Current net position for an instrument.
+    /// 查询某品种当前净持仓。
     [[nodiscard]] int32_t position(uint64_t instrument_id) const noexcept;
 
-    // ─── Diagnostics ────────────────────────────────────────────────────────
+    // ─── 诊断接口 ──────────────────────────────────────────────
     [[nodiscard]] uint64_t ticks_processed() const noexcept { return ticks_processed_; }
     [[nodiscard]] uint64_t orders_submitted() const noexcept { return orders_submitted_; }
     [[nodiscard]] uint64_t orders_rejected() const noexcept { return orders_rejected_; }
     [[nodiscard]] uint64_t fills_received() const noexcept { return fills_received_; }
 
-    /// Average on_tick() latency in nanoseconds (0 if no ticks processed).
+    /// on_tick() 平均耗时（纳秒），无 tick 时返回 0。
     [[nodiscard]] uint64_t latency_avg_ns() const noexcept {
         return ticks_processed_ ? latency_sum_ns_ / ticks_processed_ : 0;
     }
-    /// Peak on_tick() latency in nanoseconds.
+    /// on_tick() 峰值耗时（纳秒）。
     [[nodiscard]] uint64_t latency_max_ns() const noexcept { return latency_max_ns_; }
 
     [[nodiscard]] const OrderBook& order_book() const noexcept { return book_; }
@@ -104,13 +104,13 @@ private:
 
     std::atomic<bool> running_{false};
 
-    // Counters
+    // 计数器
     uint64_t ticks_processed_{0};
     uint64_t orders_submitted_{0};
     uint64_t orders_rejected_{0};
     uint64_t fills_received_{0};
 
-    // Latency stats (on_tick wall-clock, nanoseconds)
+    // 延迟统计（on_tick 挂钟时间，纳秒）
     uint64_t latency_sum_ns_{0};
     uint64_t latency_max_ns_{0};
 };

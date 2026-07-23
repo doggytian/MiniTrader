@@ -4,6 +4,6 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 
-echo "── Cleaning build directory ──"
+echo "── 清理 build 目录 ──"
 rm -rf "$BUILD_DIR"
-echo "Done."
+echo "完成。"

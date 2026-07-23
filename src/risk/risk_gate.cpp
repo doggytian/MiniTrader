@@ -20,13 +20,13 @@ RiskResult RiskGate::check(const Order& order) noexcept {
 }
 
 void RiskGate::on_fill(const ExecutionReport& report) noexcept {
+    // 按成交方向更新净持仓
     if (report.side == Side::Buy) {
         position_ += report.filled_quantity;
     } else {
         position_ -= report.filled_quantity;
     }
-    // Maker side: the resting order was (partially or fully) consumed.
-    // Full fill is handled by TradingEngine calling untrack_order().
+    // 挂单方（maker）成交后的 untrack 由 TradingEngine 统一处理
 }
 
 void RiskGate::reset() noexcept {
@@ -47,10 +47,11 @@ void RiskGate::untrack_order(uint64_t order_id) noexcept {
 }
 
 int32_t RiskGate::current_position(uint64_t /*instrument_id*/) const noexcept {
-    return position_;
+    return position_;  // 当前仅支持单品种
 }
 
 bool RiskGate::check_position_limit(const Order& order) const noexcept {
+    // 预估成交后的持仓，判断是否超限
     int32_t projected = position_;
     if (order.side == Side::Buy) {
         projected += order.quantity;
@@ -72,6 +73,7 @@ bool RiskGate::check_order_rate() noexcept {
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         now - last_rate_reset_);
     if (elapsed.count() >= 1) {
+        // 新的一秒，重置本秒计数器
         orders_this_second_ = 0;
         last_rate_reset_ = now;
     }
@@ -80,13 +82,11 @@ bool RiskGate::check_order_rate() noexcept {
 }
 
 bool RiskGate::check_self_trade(const Order& order) const noexcept {
-    // A self-trade occurs when an incoming order would cross against one of
-    // our own resting orders:
-    //   incoming BUY  at price P  would match a resting SELL at price <= P
-    //   incoming SELL at price P  would match a resting BUY  at price >= P
+    // 自成交条件：
+    //   进场买单 价格 P，命中己方挂单卖价 <= P
+    //   进场卖单 价格 P，命中己方挂单买价 >= P
     if (order.type == OrderType::Market) {
-        // Market orders cross at any price — reject if we have any resting
-        // order on the opposite side.
+        // 市价单以任意价格成交，只要对侧有挂单即触发
         for (const auto& [id, resting] : active_orders_) {
             if (resting.side != order.side) return false;
         }
@@ -94,7 +94,7 @@ bool RiskGate::check_self_trade(const Order& order) const noexcept {
     }
 
     for (const auto& [id, resting] : active_orders_) {
-        if (resting.side == order.side) continue;  // same side, no cross
+        if (resting.side == order.side) continue;  // 同侧，不会交叉
         if (order.side == Side::Buy  && resting.price <= order.price) return false;
         if (order.side == Side::Sell && resting.price >= order.price) return false;
     }

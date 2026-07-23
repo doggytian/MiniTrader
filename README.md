@@ -2,135 +2,146 @@
 
 [![CI](https://github.com/doggytian/MiniTrader/actions/workflows/ci.yml/badge.svg)](https://github.com/doggytian/MiniTrader/actions/workflows/ci.yml)
 
-A minimal, high-performance trading system built from scratch in modern C++20.  
-Designed to demonstrate low-latency system design principles used in quantitative trading.
+用现代 C++20 从零构建的高性能撮合系统，完整实现从行情接收到策略决策到风控落单的全链路，
+专注于演示量化交易场景下的低延迟系统设计原则。
 
-## Highlights
+## 亮点
 
-- **Lock-free SPSC queue** with `memory_order_acquire/release` — zero contention between market data and strategy threads
-- **Cache-friendly OrderBook** using flat price-indexed array — no pointer chasing, no red-black tree
-- **Event-driven architecture** — market data → strategy → risk check → order execution in a single deterministic path
-- **Measured performance** — full-path P99 latency benchmarked with `perf` and flame graphs
+- **无锁 SPSC 队列**：`memory_order_acquire/release` 极简内存屏障，行情线程与策略线程之间零争用
+- **缓存友好撮合簿**：平坦价格索引数组，无指针追逐，无红黑树
+- **事件驱动架构**：行情 → 策略 → 风控 → 落单，单一确定性热路径
+- **实测性能**：全链路 P99 延迟经 Google Benchmark 量化，附调用栈 profiling 分析
 
-## Architecture
+## 架构
 
 ```
-┌─────────────┐     SPSC Queue     ┌─────────────┐     Risk Gate     ┌─────────────┐
-│  Network    │ ──────────────────► │  Strategy   │ ────────────────► │   Order     │
-│  (epoll)    │   lock-free, <50ns  │  Engine     │   inline check    │  Gateway    │
-└─────────────┘                     └─────────────┘                   └─────────────┘
-       ▲                                                                     │
-       │                         ┌─────────────┐                             │
-       └──── Market Data ◄────── │  Exchange   │ ◄───── Order Ack ───────────┘
-                                 └─────────────┘
+┌─────────────┐    SPSC 队列     ┌─────────────┐    风控网关     ┌─────────────┐
+│  网络层     │ ───────────────► │  策略引擎   │ ─────────────► │  订单网关   │
+│  (epoll)    │  无锁, <50ns     │             │   内联检查      │             │
+└─────────────┘                  └─────────────┘                └─────────────┘
+       ▲                                                                │
+       │                        ┌─────────────┐                        │
+       └──── 行情数据 ◄──────── │   交易所    │ ◄──── 回报 ────────────┘
+                                └─────────────┘
 ```
 
-## Modules
+## 模块说明
 
-| Module | Description | Key Technique |
-|--------|-------------|---------------|
-| `core/spsc_queue.h` | Lock-free single-producer single-consumer ring buffer | `std::atomic`, cache-line padding, `memory_order_acquire/release` |
-| `orderbook/` | Price-time priority order book with flat array storage | Cache-friendly design, O(1) best bid/ask |
-| `strategy/` | Strategy base class with backtest/live mode switch | Template Method pattern, zero-copy event passing |
-| `network/` | epoll-based market data receiver | Edge-triggered, non-blocking IO, CPU affinity |
-| `risk/` | Inline risk gate (cancel rate, self-trade, position limit) | Zero-overhead abstraction, compile-time policy |
+| 模块 | 描述 | 核心技术 |
+|------|------|---------|
+| `core/spsc_queue.h` | 无锁单生产者单消费者环形队列 | `std::atomic`、cache-line 填充、`acquire/release` |
+| `orderbook/` | 价格-时间优先撮合簿，平坦数组存储 | 缓存友好设计，O(1) 最优买卖价 |
+| `engine/` | 交易引擎，串联行情→策略→风控→撮合全链路 | SPSC 驱动，per-tick 延迟计时 |
+| `strategy/` | 策略基类 + SpreadStrategy 做市示例 | Template Method 模式，零拷贝事件传递 |
+| `network/` | epoll 行情接收器（Linux）/ CSV 回放（macOS） | 边沿触发、非阻塞 IO、CPU 亲和性绑定 |
+| `risk/` | 内联风控网关（撤单率、自成交检测、持仓限额） | 零堆分配热路径，O(1) 全部检查 |
 
-## Quick Start
+## 快速开始
 
 ```bash
-./scripts/build.sh          # Build (Release by default)
-./scripts/run.sh            # Run the trading demo
-./scripts/test.sh           # Run all unit tests
-./scripts/bench.sh          # Run all benchmarks (with P99 histogram)
-./scripts/clean.sh          # Remove build directory
+./scripts/build.sh      # 编译（默认 Release，可传 Debug）
+./scripts/run.sh        # 运行交易 demo（含 per-tick 延迟输出）
+./scripts/test.sh       # 运行全量单元测试
+./scripts/bench.sh      # 运行全部 benchmark（含 P99 histogram）
+./scripts/clean.sh      # 清理 build 目录
 ```
 
-Or manually:
+手动编译：
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-./build/minitrader_demo     # Run demo
-./build/test_spsc_queue     # SPSC queue tests
-./build/test_orderbook      # OrderBook tests
-./build/engine_bench        # Full-path latency benchmark
+./build/minitrader_demo     # 运行 demo
+./build/test_spsc_queue     # SPSC 队列测试
+./build/test_orderbook      # 撮合簿测试
+./build/engine_bench        # 全链路延迟 benchmark
 ```
 
-<!-- TODO: Add flame graph screenshot here -->
+## 性能（Apple M1 Pro，Release 构建）
 
-## Performance (measured on Apple M1 Pro, Release build)
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| SPSC 入队出队往返 | **2.1 ns** | 单线程，int64_t 载荷 |
+| SPSC 往返（32 字节 Order 结构体） | **2.5 ns** | |
+| SPSC 吞吐（burst 8） | **434 M ops/s** | |
+| OrderBook add\_order（单价位） | **43 ns** | |
+| OrderBook cancel\_order（O(1)） | **24 ns** | unordered\_map 查找 + list::erase |
+| OrderBook 撮合（深度 ≥ 10） | **~450 ns** | 1 笔进场 vs N 笔挂单 |
+| **全路径：行情到策略返回（不下单）** | **65 ns** | SPSC 出队 + on\_tick 返回 |
+| **全路径：行情到双边下单** | **735 ns** | + 2× 风控检查 + 2× 撮合簿插入 |
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-| SPSC enqueue-dequeue round-trip | **2.1 ns** | Single-threaded, int64_t payload |
-| SPSC round-trip (32-byte struct) | **2.5 ns** | |
-| SPSC throughput (burst 8) | **434 M ops/s** | |
-| OrderBook add\_order (single level) | **43 ns** | |
-| OrderBook cancel\_order (O(1)) | **24 ns** | `unordered_map` lookup + `list::erase` |
-| OrderBook match (depth ≥ 10) | **~450 ns** | 1 incoming vs N resting |
-| **Full path: tick → strategy (no order)** | **65 ns** | SPSC dequeue + on_tick return |
-| **Full path: tick → 2× order submit** | **735 ns** | + 2× risk check + 2× book insert |
+### 延迟分位数（10 万次稳态采样）
 
-### Latency Percentiles (100K tick steady-state)
-
-| P50 | P90 | P99 | P99.9 | Max |
-|-----|-----|-----|-------|-----|
+| P50 | P90 | P99 | P99.9 | 峰值 |
+|-----|-----|-----|-------|------|
 | 83 ns | 84 ns | 125 ns | 167 ns | ~14 µs |
 
-> **Profiling note**: `sample`-based call-graph analysis (`docs/engine_sample_profile.txt`)
-> shows that ~80% of measured time in the histogram benchmark is spent inside
-> `steady_clock::now()` → `mach_continuous_time` (the measurement overhead itself).
-> The actual business logic (`on_tick` + SPSC dequeue) is only ~6 ns per iteration,
-> consistent with the `BM_EngineTickNoOrder` result of **65 ns** (which includes
-> two `steady_clock::now()` calls in `run_once()`).
-> Tail latency spikes to ~14 µs are OS scheduling jitter, not application logic.
+> **Profiling 说明**：`sample` 调用栈分析（`docs/engine_sample_profile.txt`）显示，
+> histogram benchmark 中约 80% 的采样时间花在 `steady_clock::now()` →
+> `mach_continuous_time`（即计时开销本身），实际业务逻辑（on\_tick + SPSC 出队）
+> 仅约 6 ns/次，与 `BM_EngineTickNoOrder` 的 **65 ns**（含两次计时调用）一致。
+> 峰值 ~14 µs 为 OS 调度抖动，非应用逻辑。
 
-> Numbers above are single-threaded micro-benchmarks. Real-world latency depends on network stack and system load.
-
-## Project Structure
+## 项目结构
 
 ```
 MiniTrader/
 ├── CMakeLists.txt
 ├── README.md
+├── scripts/                    # 一键操作脚本
+│   ├── build.sh
+│   ├── run.sh
+│   ├── test.sh
+│   ├── bench.sh
+│   └── clean.sh
 ├── include/
 │   ├── core/
-│   │   └── spsc_queue.h        # Lock-free SPSC ring buffer
+│   │   └── spsc_queue.h        # 无锁 SPSC 环形队列
 │   ├── orderbook/
-│   │   ├── order.h             # Order types and definitions
-│   │   ├── price_level.h       # Price level (bid/ask bucket)
-│   │   └── order_book.h        # Order book with matching engine
+│   │   ├── order.h             # 订单类型定义
+│   │   ├── price_level.h       # 价位（bid/ask 桶）
+│   │   └── order_book.h        # 带撮合引擎的订单簿
+│   ├── engine/
+│   │   └── trading_engine.h    # 交易引擎（全链路协调）
 │   ├── strategy/
-│   │   └── strategy_base.h     # Strategy interface
+│   │   ├── strategy_base.h     # 策略基类接口
+│   │   └── spread_strategy.h   # 做市策略示例
 │   ├── network/
-│   │   └── market_receiver.h   # epoll-based market data receiver
+│   │   └── market_receiver.h   # epoll 行情接收器 / CSV 回放
 │   └── risk/
-│       └── risk_gate.h         # Inline risk checks
-├── src/
-│   ├── core/
-│   ├── orderbook/
-│   ├── strategy/
-│   ├── network/
-│   └── risk/
-├── tests/                      # Unit tests (Google Test)
-├── bench/                      # Micro-benchmarks (Google Benchmark)
-└── docs/                       # Design notes, flame graphs
+│       └── risk_gate.h         # 内联风控检查
+├── src/                        # 对应实现文件
+├── tests/                      # 单元测试（Google Test）
+├── bench/                      # 微基准测试（Google Benchmark）
+├── data/
+│   └── sample_ticks.csv        # 示例行情数据（CSV 回放用）
+└── docs/                       # 设计文档、profiling 报告
 ```
 
-## Design Decisions
+## 设计决策
 
-### Why flat array instead of `std::map` for OrderBook?
+### 为什么用平坦数组而不是 `std::map`？
 
-`std::map` (red-black tree) has O(log N) access but terrible cache behavior — each node is a heap allocation with pointer indirection. For an order book where price ticks are bounded and dense, a flat array indexed by `(price - min_price) / tick_size` gives O(1) access with perfect spatial locality.
+`std::map`（红黑树）的 O(log N) 访问伴随严重的缓存不友好——每个节点都是独立堆分配，
+指针追逐不可避免。对于价格 tick 有界且密集的订单簿，用 `(price - min_price) / tick_size`
+作为数组下标实现 O(1) 访问，空间局部性完美。
 
-### Why SPSC queue instead of `std::mutex`?
+### 为什么用 SPSC 队列而不是 mutex？
 
-In a trading system, the market data thread and strategy thread form a natural producer-consumer pair. A lock-free SPSC queue eliminates contention entirely — the producer and consumer never touch the same cache line (with proper padding). This gives deterministic latency without any OS scheduling dependency.
+行情线程和策略线程天然构成生产者-消费者对。无锁 SPSC 队列完全消除竞争——通过
+cache-line 填充，生产者和消费者永远不会触碰同一 cache line，延迟确定且无 OS 调度依赖。
 
-### Why epoll edge-triggered?
+### 为什么 `cancel_order` 用 `list` 而不是 `deque`？
 
-Level-triggered `epoll` re-notifies on every `epoll_wait` if data remains in the buffer. Edge-triggered notifies only on state change, reducing syscall overhead. Combined with non-blocking reads until `EAGAIN`, this minimizes kernel transitions in the hot path.
+`deque` 在 `push_back` 时迭代器可能失效，无法缓存"订单位置迭代器"。
+`std::list` 迭代器在任意插入/删除后永远有效，配合 `unordered_map<id → iterator>`
+实现真正的 O(1) 撤单（哈希查找 + list::erase）。
 
-## License
+### 为什么用 epoll 边沿触发？
+
+水平触发的 epoll 只要缓冲区有数据就会在每次 `epoll_wait` 重新通知，增加 syscall 开销。
+边沿触发仅在状态变化时通知，配合非阻塞读直到 `EAGAIN`，最小化热路径的内核态切换次数。
+
+## 许可证
 
 MIT

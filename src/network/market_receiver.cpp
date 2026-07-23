@@ -1,7 +1,7 @@
 #include "network/market_receiver.h"
 #include "strategy/strategy_base.h"
 
-// Platform-specific includes
+// 平台相关头文件
 #ifdef __linux__
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -45,41 +45,39 @@ void MarketReceiver::run() {
     running_ = true;
     event_loop();
 #else
-    // ── macOS / non-Linux: CSV replay mode ──────────────────────────────────
-    // Expected CSV format (header required):
+    // ── macOS / 非 Linux：CSV 文件回放模式 ──────────────────────────────────
+    // CSV 格式（支持可选表头行）：
     //   instrument_id,bid_price,ask_price,bid_size,ask_size,last_price,last_size
     //
-    // Example:
+    // 示例：
     //   1,9998,10002,100,100,10000,10
     //   1,9997,10003,200,150,10000,5
     //
-    // If config_.multicast_group is a readable file path, replay it;
-    // otherwise print a warning and return immediately.
+    // config_.multicast_group 填 CSV 文件路径；
+    // config_.recv_buf_size 复用为回放间隔（微秒，0 = 不等待）。
 
     const std::string& path = config_.multicast_group;
     if (path.empty()) {
         std::fprintf(stderr,
-            "[MarketReceiver] macOS: set ReceiverConfig.multicast_group to a "
-            "CSV file path for replay mode.\n");
+            "[MarketReceiver] macOS 回放模式：请将 ReceiverConfig.multicast_group "
+            "设为 CSV 文件路径（参考 data/sample_ticks.csv）\n");
         return;
     }
 
     std::ifstream f(path);
     if (!f.is_open()) {
         std::fprintf(stderr,
-            "[MarketReceiver] replay: cannot open '%s'\n", path.c_str());
+            "[MarketReceiver] 无法打开回放文件：%s\n", path.c_str());
         return;
     }
 
     running_ = true;
     std::string line;
 
-    // Skip header line if present
+    // 处理第一行：若首字符非数字则为表头，跳过；否则当数据行解析
     if (std::getline(f, line)) {
-        // Detect header: if first token is not a number, it's a header row
         bool is_header = (line[0] < '0' || line[0] > '9');
         if (!is_header) {
-            // Re-parse this line as data
             std::istringstream ss(line);
             MarketTick tick{};
             char comma;
@@ -98,7 +96,7 @@ void MarketReceiver::run() {
     }
 
     while (running_ && std::getline(f, line)) {
-        if (line.empty() || line[0] == '#') continue;
+        if (line.empty() || line[0] == '#') continue;  // 跳过空行和注释
 
         std::istringstream ss(line);
         MarketTick tick{};
@@ -111,7 +109,7 @@ void MarketReceiver::run() {
                  >> tick.last_price   >> comma
                  >> tick.last_size)) {
             std::fprintf(stderr,
-                "[MarketReceiver] replay: malformed line: %s\n", line.c_str());
+                "[MarketReceiver] 格式错误，跳过：%s\n", line.c_str());
             continue;
         }
 
@@ -120,8 +118,7 @@ void MarketReceiver::run() {
 
         if (callback_) callback_(tick);
 
-        // Simulate ~1ms between ticks (configurable via recv_buf_size field
-        // repurposed as replay_interval_us when in replay mode)
+        // 按配置的回放间隔控制速度（微秒），0 表示不等待
         if (config_.recv_buf_size > 0) {
             std::this_thread::sleep_for(
                 std::chrono::microseconds(config_.recv_buf_size));
@@ -137,20 +134,23 @@ void MarketReceiver::stop() noexcept {
 
 void MarketReceiver::setup_socket() {
 #ifdef __linux__
+    // 创建非阻塞 UDP socket
     socket_fd_ = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
 
+    // 设置大接收缓冲区，吸收突发行情
     ::setsockopt(socket_fd_, SOL_SOCKET, SO_RCVBUF,
                  &config_.recv_buf_size, sizeof(config_.recv_buf_size));
 
     sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(config_.port);
+    addr.sin_family      = AF_INET;
+    addr.sin_port        = htons(config_.port);
     addr.sin_addr.s_addr = INADDR_ANY;
     ::bind(socket_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 
+    // 注册到 epoll，边沿触发（ET）
     epoll_fd_ = ::epoll_create1(0);
     epoll_event ev{};
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events  = EPOLLIN | EPOLLET;
     ev.data.fd = socket_fd_;
     ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, socket_fd_, &ev);
 #endif
@@ -172,13 +172,15 @@ void MarketReceiver::event_loop() {
     char buf[65536];
 
     while (running_) {
+        // 1ms 超时，允许 stop() 后及时退出
         int nfds = ::epoll_wait(epoll_fd_, events, MAX_EVENTS, 1);
         for (int i = 0; i < nfds; ++i) {
             if (events[i].events & EPOLLIN) {
+                // 边沿触发：循环读直到 EAGAIN
                 while (true) {
                     ssize_t n = ::recv(socket_fd_, buf, sizeof(buf), 0);
                     if (n <= 0) break;
-                    // TODO: decode wire protocol → MarketTick → callback_
+                    // TODO: 解码行情协议 → MarketTick → callback_
                     (void)n;
                 }
             }

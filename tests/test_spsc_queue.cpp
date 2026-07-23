@@ -4,6 +4,7 @@
 
 using namespace minitrader;
 
+// 基础入队出队测试
 TEST(SPSCQueueTest, BasicPushPop) {
     SPSCQueue<int, 16> q;
 
@@ -17,21 +18,24 @@ TEST(SPSCQueueTest, BasicPushPop) {
     EXPECT_TRUE(q.empty());
 }
 
+// 队列满时 try_push 返回 false
 TEST(SPSCQueueTest, FullQueue) {
-    SPSCQueue<int, 4> q;  // Capacity = 3 (one slot reserved)
+    SPSCQueue<int, 4> q;  // 实际容量 = 3（保留一个槽位）
 
     EXPECT_TRUE(q.try_push(1));
     EXPECT_TRUE(q.try_push(2));
     EXPECT_TRUE(q.try_push(3));
-    EXPECT_FALSE(q.try_push(4));  // Full!
+    EXPECT_FALSE(q.try_push(4));  // 队列已满
 }
 
+// 空队列 try_pop 返回 nullopt
 TEST(SPSCQueueTest, EmptyPop) {
     SPSCQueue<int, 8> q;
     auto val = q.try_pop();
     EXPECT_FALSE(val.has_value());
 }
 
+// 先进先出顺序验证
 TEST(SPSCQueueTest, FIFO_Order) {
     SPSCQueue<int, 64> q;
 
@@ -45,6 +49,7 @@ TEST(SPSCQueueTest, FIFO_Order) {
     }
 }
 
+// 真并发：100 万次生产消费，验证无数据丢失和顺序正确
 TEST(SPSCQueueTest, ConcurrentProducerConsumer) {
     constexpr int N = 1'000'000;
     SPSCQueue<int, 1024> q;
@@ -52,7 +57,7 @@ TEST(SPSCQueueTest, ConcurrentProducerConsumer) {
     std::thread producer([&]() {
         for (int i = 0; i < N; ++i) {
             while (!q.try_push(i)) {
-                // Spin until space available
+                // 自旋等待空槽
             }
         }
     });
@@ -61,7 +66,7 @@ TEST(SPSCQueueTest, ConcurrentProducerConsumer) {
         for (int i = 0; i < N; ++i) {
             std::optional<int> val;
             while (!(val = q.try_pop())) {
-                // Spin until data available
+                // 自旋等待数据
             }
             EXPECT_EQ(*val, i);
         }

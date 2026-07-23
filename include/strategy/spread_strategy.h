@@ -6,28 +6,28 @@
 
 namespace minitrader {
 
-class TradingEngine;  // forward declaration for cancel_resting_quotes
+class TradingEngine;  // 供 cancel_resting_quotes 使用的前向声明
 
+/// 价差做市策略配置。
 struct SpreadStrategyConfig {
     uint64_t instrument_id{1};
-    int64_t  half_spread{1};    // ticks each side from mid
-    int32_t  order_size{10};    // lots per side
-    bool     verbose{true};     // print quotes/fills to stdout
+    int64_t  half_spread{1};   // 报价偏离中间价的 tick 数（单侧）
+    int32_t  order_size{10};   // 每侧报价数量（手）
+    bool     verbose{true};    // 是否打印报价 / 成交日志
 };
 
-/// Simple spread-making strategy.
+/// 简单价差做市策略。
 ///
-/// Logic:
-///   On each tick, if we have no resting orders:
-///     - Place a buy  limit at (mid - half_spread)
-///     - Place a sell limit at (mid + half_spread)
-///   On fill:
-///     - Cancel the unfilled side (avoid one-sided position buildup)
-///     - Let the next tick re-quote both sides
+/// 逻辑：
+///   每个 tick，若双侧均无挂单：
+///     - 在 (mid - half_spread) 挂买单
+///     - 在 (mid + half_spread) 挂卖单
+///   成交后：
+///     - 撤销未成交的对侧单（防止单侧持仓积累）
+///     - 等待下一个 tick 重新双边报价
 ///
-/// This is the minimal skeleton of a market-making strategy.
-/// It is NOT a production system — position limits, inventory skew,
-/// adverse selection filters, and fee math are deliberately omitted.
+/// 这是做市策略的最小骨架，刻意省略了：
+/// 持仓倾斜（inventory skew）、逆向选择过滤、手续费建模等生产级细节。
 class SpreadStrategy : public StrategyBase {
 public:
     explicit SpreadStrategy(SpreadStrategyConfig cfg = {}) : cfg_(cfg) {}
@@ -39,7 +39,7 @@ public:
     void on_fill(const ExecutionReport& report) override;
     void on_stop() override;
 
-    /// Cancel resting quotes and reset internal IDs (for benchmarking).
+    /// 撤销当前活跃报价并重置内部 ID（供 benchmark 使用）。
     void cancel_resting_quotes(TradingEngine& engine);
 
 private:
@@ -48,11 +48,11 @@ private:
     SpreadStrategyConfig cfg_;
     uint64_t next_id_{0};
 
-    // IDs of currently resting quotes (0 = not live)
+    // 当前活跃报价的订单 ID（0 = 无挂单）
     uint64_t bid_order_id_{0};
     uint64_t ask_order_id_{0};
 
-    // P&L tracking (tick × lots, not real currency)
+    // 盈亏跟踪（tick × 手，非真实货币）
     int64_t  realized_pnl_{0};
     int32_t  fill_count_{0};
 };

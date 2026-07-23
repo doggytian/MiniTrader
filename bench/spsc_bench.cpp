@@ -3,26 +3,26 @@
 
 using namespace minitrader;
 
-// Benchmark: single-threaded push/pop throughput
+// 单线程 push/pop 往返吞吐测试
 static void BM_SPSCPushPop(benchmark::State& state) {
     SPSCQueue<int64_t, 1024> q;
 
     for (auto _ : state) {
-        q.try_push(42);
+        std::ignore = q.try_push(42);
         auto val = q.try_pop();
         benchmark::DoNotOptimize(val);
     }
 }
 BENCHMARK(BM_SPSCPushPop);
 
-// Benchmark: burst write then burst read
+// 突发写后突发读（模拟行情批量到达）
 static void BM_SPSCBurst(benchmark::State& state) {
     SPSCQueue<int64_t, 1024> q;
     const int burst_size = static_cast<int>(state.range(0));
 
     for (auto _ : state) {
         for (int i = 0; i < burst_size; ++i) {
-            q.try_push(i);
+            std::ignore = q.try_push(i);
         }
         for (int i = 0; i < burst_size; ++i) {
             auto val = q.try_pop();
@@ -33,11 +33,11 @@ static void BM_SPSCBurst(benchmark::State& state) {
 }
 BENCHMARK(BM_SPSCBurst)->Range(8, 512);
 
-// Benchmark: struct (simulating Order) push/pop
+// 传输真实 Order 尺寸结构体（32 字节）的 push/pop 开销
 struct FakeOrder {
     uint64_t id;
-    int64_t price;
-    int32_t qty;
+    int64_t  price;
+    int32_t  qty;
     uint64_t ts;
 };
 
@@ -45,7 +45,7 @@ static void BM_SPSCOrder(benchmark::State& state) {
     SPSCQueue<FakeOrder, 1024> q;
 
     for (auto _ : state) {
-        q.try_push(FakeOrder{1, 15000, 100, 123456789});
+        std::ignore = q.try_push(FakeOrder{1, 15000, 100, 123456789});
         auto val = q.try_pop();
         benchmark::DoNotOptimize(val);
     }

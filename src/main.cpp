@@ -12,47 +12,47 @@ using namespace minitrader;
 int main() {
     std::printf("=== MiniTrader Demo ===\n\n");
 
-    // ── Engine setup ─────────────────────────────────────────────────────────
+    // ── 引擎配置 ─────────────────────────────────────────────────────────────
     EngineConfig eng_cfg;
     eng_cfg.book_config = {.min_price = 1, .max_price = 100000, .tick_size = 1};
     eng_cfg.risk_config = {
         .max_position          = 500,
         .max_orders_per_second = 200,
         .max_cancel_ratio      = 0.9,
-        .check_self_trade      = false,
+        .check_self_trade      = false,  // demo 中策略与自己撮合，关闭自成交检测
     };
-    eng_cfg.enable_latency_log = true;   // print per-tick latency
+    eng_cfg.enable_latency_log = true;  // 打印每个 tick 的 on_tick 耗时
 
     TradingEngine engine(eng_cfg);
 
-    // ── Strategy setup ───────────────────────────────────────────────────────
+    // ── 策略配置 ─────────────────────────────────────────────────────────────
     SpreadStrategy strategy(SpreadStrategyConfig{
         .instrument_id = 1,
-        .half_spread   = 2,   // quote 2 ticks each side of mid
+        .half_spread   = 2,  // 在中间价两侧各 2 tick 报价
         .order_size    = 5,
     });
 
     engine.set_strategy(&strategy);
 
-    // ── Mock market data ─────────────────────────────────────────────────────
-    // Simulate 20 ticks: price drifts up then down, spread narrows once.
-    // Occasionally an aggressive order appears and crosses our quote.
+    // ── 模拟行情数据 ──────────────────────────────────────────────────────────
+    // 20 个 tick：价格先涨后跌，价差时宽时窄。
+    // 其中两个时刻有外部激进单主动成交我们的挂单。
     struct MockTick { int64_t bid; int64_t ask; };
     const MockTick ticks[] = {
-        {9995, 10005},   // wide spread, mid=10000
+        {9995, 10005},   // 价差宽，mid=10000
         {9996, 10004},
         {9997, 10003},
-        {9998, 10002},   // narrow — our ask at 10001 may get hit externally
-        {9999, 10001},   // very tight; mid=10000, we quote 9998/10002
+        {9998, 10002},
+        {9999, 10001},   // 价差极窄
         {9998, 10002},
         {9997, 10003},
         {9995, 10005},
-        {9990, 10010},   // sudden widen
+        {9990, 10010},   // 价差突然扩大
         {9992, 10008},
         {9994, 10006},
         {9996, 10004},
         {9998, 10002},
-        {10000, 10004},  // bid jumps — someone buys aggressively
+        {10000, 10004},  // 买一上移，有人主动买入
         {10001, 10005},
         {10000, 10004},
         {9999, 10003},
@@ -61,18 +61,18 @@ int main() {
         {9996, 10000},
     };
 
-    std::printf("── Feeding %zu ticks ──\n\n", std::size(ticks));
+    std::printf("── 推送 %zu 个 tick ──\n\n", std::size(ticks));
 
     for (std::size_t i = 0; i < std::size(ticks); ++i) {
         const auto& t = ticks[i];
         MarketTick tick{
-            .instrument_id        = 1,
-            .bid_price            = t.bid,
-            .ask_price            = t.ask,
-            .bid_size             = 100,
-            .ask_size             = 100,
-            .last_price           = (t.bid + t.ask) / 2,
-            .last_size            = 10,
+            .instrument_id         = 1,
+            .bid_price             = t.bid,
+            .ask_price             = t.ask,
+            .bid_size              = 100,
+            .ask_size              = 100,
+            .last_price            = (t.bid + t.ask) / 2,
+            .last_size             = 10,
             .exchange_timestamp_ns = Order::now_ns(),
             .local_timestamp_ns    = Order::now_ns(),
         };
@@ -80,43 +80,43 @@ int main() {
         std::ignore = engine.push_tick(tick);
         std::ignore = engine.run_once();
 
-        // After tick 2: external aggressive sell hits our resting bid
-        // After tick 8: external aggressive buy hits our resting ask
+        // tick 2 之后：外部激进卖单打到我们的买价
+        // tick 8 之后：外部激进买单打到我们的卖价
         if (i == 2) {
-            std::printf("[external] aggressive SELL @ 9998 hits our bid\n");
+            std::printf("[外部] 激进卖单 @ 9998 打到我们的买单\n");
             engine.submit_order(Order{
                 9000001, 1, 9998, 5, Side::Sell, OrderType::Limit, 0, Order::now_ns()
             });
         }
         if (i == 8) {
-            std::printf("[external] aggressive BUY @ 10002 hits our ask\n");
+            std::printf("[外部] 激进买单 @ 10002 打到我们的卖单\n");
             engine.submit_order(Order{
                 9000002, 1, 10002, 5, Side::Buy, OrderType::Limit, 0, Order::now_ns()
             });
         }
     }
 
-    // ── Force strategy shutdown ──────────────────────────────────────────────
+    // ── 策略停止 ──────────────────────────────────────────────────────────────
     strategy.on_stop();
 
-    // ── Summary ─────────────────────────────────────────────────────────────
-    std::printf("\n── Engine stats ──\n");
-    std::printf("  ticks processed : %llu\n",
+    // ── 统计摘要 ──────────────────────────────────────────────────────────────
+    std::printf("\n── 引擎统计 ──\n");
+    std::printf("  已处理 tick 数 : %llu\n",
                 static_cast<unsigned long long>(engine.ticks_processed()));
-    std::printf("  orders submitted: %llu\n",
+    std::printf("  已提交订单数   : %llu\n",
                 static_cast<unsigned long long>(engine.orders_submitted()));
-    std::printf("  orders rejected : %llu\n",
+    std::printf("  被拒绝订单数   : %llu\n",
                 static_cast<unsigned long long>(engine.orders_rejected()));
-    std::printf("  fills received  : %llu\n",
+    std::printf("  已收到成交数   : %llu\n",
                 static_cast<unsigned long long>(engine.fills_received()));
-    std::printf("  best bid        : %lld\n",
+    std::printf("  当前最优买价   : %lld\n",
                 static_cast<long long>(engine.order_book().best_bid()));
-    std::printf("  best ask        : %lld\n",
+    std::printf("  当前最优卖价   : %lld\n",
                 static_cast<long long>(engine.order_book().best_ask()));
-    std::printf("\n── on_tick() latency (dequeue → strategy returned) ──\n");
-    std::printf("  avg : %llu ns\n",
+    std::printf("\n── on_tick() 延迟（出队 → 策略返回）──\n");
+    std::printf("  均值 : %llu ns\n",
                 static_cast<unsigned long long>(engine.latency_avg_ns()));
-    std::printf("  peak: %llu ns\n",
+    std::printf("  峰值 : %llu ns\n",
                 static_cast<unsigned long long>(engine.latency_max_ns()));
 
     return 0;
