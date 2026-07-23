@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(MiniTrader VERSION 0.1.0 LANGUAGES CXX)
 
+# Prefer Homebrew packages over conda/system when on macOS
+if(APPLE AND EXISTS "/opt/homebrew")
+    list(PREPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

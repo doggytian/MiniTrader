@@ -19,6 +19,11 @@ inline constexpr std::size_t kCacheLineSize = 64;
 /// - memory_order_acquire/release for minimal fence overhead
 /// - No dynamic allocation after construction (pre-allocated storage)
 ///
+/// Storage uses `alignas(T) std::byte[]` rather than the deprecated
+/// `std::aligned_storage_t<>` (removed in C++23, P1413R3).  std::byte has
+/// no aliasing restrictions and `sizeof(storage_)` is exactly sizeof(T)*Cap
+/// with no hidden rounding surprises.
+///
 /// @tparam T      Element type (must be trivially copyable for optimal perf)
 /// @tparam Cap    Capacity (must be power of 2)
 template <typename T, std::size_t Cap>
@@ -45,8 +50,10 @@ public:
             return false;
         }
 
-        // Construct element in-place
-        new (&storage_[tail]) T(std::forward<Args>(args)...);
+        // Placement-new into the slot.
+        // slot_ptr() returns a std::byte* offset by tail*sizeof(T) bytes;
+        // std::byte pointer arithmetic is byte-granular and well-defined.
+        new (slot_ptr(tail)) T(std::forward<Args>(args)...);
 
         // Publish: make the element visible to the consumer
         tail_.store(next_tail, std::memory_order_release);
@@ -65,8 +72,8 @@ public:
             return std::nullopt;
         }
 
-        // Read element
-        T* elem = reinterpret_cast<T*>(&storage_[head]);
+        // Reinterpret the raw bytes at slot[head] as a live T object.
+        T* elem = std::launder(reinterpret_cast<T*>(slot_ptr(head)));
         std::optional<T> result(std::move(*elem));
         elem->~T();
 
@@ -93,6 +100,14 @@ public:
 private:
     static constexpr std::size_t kMask = Cap - 1;
 
+    /// Returns a pointer to the first byte of slot \p idx.
+    std::byte* slot_ptr(std::size_t idx) noexcept {
+        return storage_ + idx * sizeof(T);
+    }
+    const std::byte* slot_ptr(std::size_t idx) const noexcept {
+        return storage_ + idx * sizeof(T);
+    }
+
     // Cache-line aligned and padded to prevent false sharing
     alignas(kCacheLineSize) std::atomic<std::size_t> head_;
     char pad1_[kCacheLineSize - sizeof(std::atomic<std::size_t>)];
@@ -100,9 +115,10 @@ private:
     alignas(kCacheLineSize) std::atomic<std::size_t> tail_;
     char pad2_[kCacheLineSize - sizeof(std::atomic<std::size_t>)];
 
-    // Storage: aligned array of raw bytes for placement new
-    alignas(kCacheLineSize)
-        std::aligned_storage_t<sizeof(T), alignof(T)> storage_[Cap];
+    // Raw storage: cache-line aligned, element-aligned byte array.
+    // std::byte[] avoids the C++23-deprecated std::aligned_storage_t<> and
+    // gives a predictable sizeof (no alignment-rounding surprises).
+    alignas(kCacheLineSize) alignas(T) std::byte storage_[sizeof(T) * Cap];
 };
 
 }  // namespace minitrader
