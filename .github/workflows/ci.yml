@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-test:
     strategy:
+      fail-fast: false   # let both matrix jobs run independently
       matrix:
         os: [ubuntu-latest, macos-latest]
         build_type: [Release]
@@ -22,11 +23,29 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y cmake libgtest-dev libgoogle-benchmark-dev
+          sudo apt-get install -y cmake
+
+          # Build GTest from source (libgtest-dev only ships headers+source)
+          sudo apt-get install -y libgtest-dev
+          cd /usr/src/googletest
+          sudo cmake -B build -DCMAKE_BUILD_TYPE=Release
+          sudo cmake --build build --parallel
+          sudo cmake --install build
+
+          # google-benchmark: build from source for reliable availability
+          sudo apt-get install -y git
+          git clone --depth 1 --branch v1.9.0 \
+            https://github.com/google/benchmark.git /tmp/benchmark
+          cmake -S /tmp/benchmark -B /tmp/benchmark/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBENCHMARK_ENABLE_TESTING=OFF
+          cmake --build /tmp/benchmark/build --parallel
+          sudo cmake --install /tmp/benchmark/build
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install googletest google-benchmark
+        run: |
+          brew install googletest google-benchmark
 
       - name: Configure
         run: |
