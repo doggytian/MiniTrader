@@ -74,29 +74,10 @@ void MarketReceiver::run() {
     running_ = true;
     std::string line;
 
-    // 处理第一行：若首字符非数字则为表头，跳过；否则当数据行解析
-    if (std::getline(f, line)) {
-        bool is_header = (line[0] < '0' || line[0] > '9');
-        if (!is_header) {
-            std::istringstream ss(line);
-            MarketTick tick{};
-            char comma;
-            if (ss >> tick.instrument_id >> comma
-                   >> tick.bid_price    >> comma
-                   >> tick.ask_price    >> comma
-                   >> tick.bid_size     >> comma
-                   >> tick.ask_size     >> comma
-                   >> tick.last_price   >> comma
-                   >> tick.last_size) {
-                tick.exchange_timestamp_ns = Order::now_ns();
-                tick.local_timestamp_ns    = Order::now_ns();
-                if (callback_) callback_(tick);
-            }
-        }
-    }
-
     while (running_ && std::getline(f, line)) {
         if (line.empty() || line[0] == '#') continue;  // 跳过空行和注释
+        // 跳过表头行（首字符为字母）
+        if (line[0] < '0' || line[0] > '9') continue;
 
         std::istringstream ss(line);
         MarketTick tick{};
