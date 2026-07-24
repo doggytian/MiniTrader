@@ -48,15 +48,17 @@ target_link_libraries(minitrader_engine PUBLIC
 
 # Demo executable
 add_executable(minitrader_demo src/main.cpp)
-target_link_libraries(minitrader_demo PRIVATE minitrader_engine minitrader_strategy)
+target_link_libraries(minitrader_demo PRIVATE
+    minitrader_engine
+    minitrader_strategy
+    minitrader_network
+)
 
-# Network library (Linux only - epoll)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_library(minitrader_network
-        src/network/market_receiver.cpp
-    )
-    target_link_libraries(minitrader_network PUBLIC minitrader_core)
-endif()
+# Network library (epoll on Linux, CSV replay on macOS/other)
+add_library(minitrader_network
+    src/network/market_receiver.cpp
+)
+target_link_libraries(minitrader_network PUBLIC minitrader_core)
 
 # Risk library
 add_library(minitrader_risk

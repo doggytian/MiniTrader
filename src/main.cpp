@@ -9,10 +9,69 @@
 
 using namespace minitrader;
 
-int main() {
-    std::printf("=== MiniTrader Demo ===\n\n");
+#include <cstdio>
+#include <cstdint>
+#include <cstring>
+#include <tuple>
+#include <thread>
+#include <chrono>
 
-    // ── 引擎配置 ─────────────────────────────────────────────────────────────
+#include "engine/trading_engine.h"
+#include "network/market_receiver.h"
+#include "strategy/spread_strategy.h"
+
+using namespace minitrader;
+
+// ── CSV 回放模式 ──────────────────────────────────────────────────────────────
+// 用法：./minitrader_demo --recv <csv文件路径>
+// MarketReceiver 逐行读取 CSV，每条 tick 推入引擎，策略实时响应。
+static void run_recv_mode(const char* csv_path) {
+    std::printf("=== MiniTrader CSV 回放模式 ===\n");
+    std::printf("文件：%s\n\n", csv_path);
+
+    EngineConfig eng_cfg;
+    eng_cfg.book_config        = {.min_price = 1, .max_price = 100000, .tick_size = 1};
+    eng_cfg.risk_config        = {.max_position = 500, .max_orders_per_second = 200,
+                                  .max_cancel_ratio = 0.9, .check_self_trade = false};
+    eng_cfg.enable_latency_log = false;  // 回放模式关闭逐 tick 打印
+
+    TradingEngine engine(eng_cfg);
+
+    SpreadStrategy strategy(SpreadStrategyConfig{
+        .instrument_id = 1,
+        .half_spread   = 2,
+        .order_size    = 5,
+        .verbose       = true,
+    });
+    engine.set_strategy(&strategy);
+    strategy.on_start();
+
+    // MarketReceiver 读 CSV，每条 tick 直接推入引擎并立即处理
+    ReceiverConfig recv_cfg;
+    recv_cfg.multicast_group = csv_path;
+    recv_cfg.recv_buf_size   = 0;  // 不加回放延迟
+
+    MarketReceiver receiver(recv_cfg);
+    receiver.set_callback([&](const MarketTick& tick) {
+        std::ignore = engine.push_tick(tick);
+        std::ignore = engine.run_once();
+    });
+
+    receiver.run();  // 同步读完整个 CSV
+
+    strategy.on_stop();
+
+    std::printf("\n── 引擎统计 ──\n");
+    std::printf("  已处理 tick 数 : %llu\n",
+                static_cast<unsigned long long>(engine.ticks_processed()));
+    std::printf("  已提交订单数   : %llu\n",
+                static_cast<unsigned long long>(engine.orders_submitted()));
+    std::printf("  已收到成交数   : %llu\n",
+                static_cast<unsigned long long>(engine.fills_received()));
+}
+
+// ── Mock 行情模式（默认）─────────────────────────────────────────────────────
+static void run_mock_mode() {
     EngineConfig eng_cfg;
     eng_cfg.book_config = {.min_price = 1, .max_price = 100000, .tick_size = 1};
     eng_cfg.risk_config = {
@@ -118,6 +177,16 @@ int main() {
                 static_cast<unsigned long long>(engine.latency_avg_ns()));
     std::printf("  峰值 : %llu ns\n",
                 static_cast<unsigned long long>(engine.latency_max_ns()));
+}
 
+// ── 入口 ──────────────────────────────────────────────────────────────────────
+// 默认 mock 模式：./minitrader_demo
+// CSV 回放模式：  ./minitrader_demo --recv data/sample_ticks.csv
+int main(int argc, char* argv[]) {
+    if (argc >= 3 && std::strcmp(argv[1], "--recv") == 0) {
+        run_recv_mode(argv[2]);
+    } else {
+        run_mock_mode();
+    }
     return 0;
 }
