@@ -61,6 +61,7 @@ static void run_recv_mode(const char* csv_path) {
 
     strategy.on_stop();
 
+    // ── 引擎统计 ──────────────────────────────────────────────────────────────
     std::printf("\n── 引擎统计 ──\n");
     std::printf("  已处理 tick 数 : %llu\n",
                 static_cast<unsigned long long>(engine.ticks_processed()));
@@ -68,6 +69,39 @@ static void run_recv_mode(const char* csv_path) {
                 static_cast<unsigned long long>(engine.orders_submitted()));
     std::printf("  已收到成交数   : %llu\n",
                 static_cast<unsigned long long>(engine.fills_received()));
+
+    // ── on_tick() 延迟报告（基于真实 tick 间隔驱动）──────────────────────────
+    std::printf("\n── on_tick() 延迟分布（出队 → 策略返回，真实 tick 序列驱动）──\n");
+    std::printf("  均值   : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_avg_ns()));
+    std::printf("  峰值   : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_max_ns()));
+    std::printf("  P50    : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_percentile_ns(50.0)));
+    std::printf("  P99    : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_percentile_ns(99.0)));
+    std::printf("  P99.9  : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_percentile_ns(99.9)));
+
+    // 直方图
+    std::printf("\n── 延迟直方图 ──\n");
+    const auto& hist = engine.latency_histogram();
+    const uint64_t total = engine.ticks_processed();
+    static constexpr const char* kLabels[TradingEngine::kHistBuckets] = {
+        "<100ns", "<200ns", "<500ns", "<1µs",
+        "<5µs",   "<10µs",  "<100µs", "≥100µs",
+    };
+    for (std::size_t b = 0; b < TradingEngine::kHistBuckets; ++b) {
+        const double pct = total ? 100.0 * hist[b] / total : 0.0;
+        // 简易 ASCII 进度条（最宽 40 列）
+        const int bar_len = static_cast<int>(pct / 100.0 * 40);
+        std::printf("  %-8s %5llu (%5.1f%%)  |",
+                    kLabels[b],
+                    static_cast<unsigned long long>(hist[b]),
+                    pct);
+        for (int i = 0; i < bar_len; ++i) std::putchar('#');
+        std::putchar('\n');
+    }
 }
 
 // ── Mock 行情模式（默认）─────────────────────────────────────────────────────

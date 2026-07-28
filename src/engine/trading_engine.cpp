@@ -1,5 +1,6 @@
 #include "engine/trading_engine.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <stdexcept>
@@ -38,8 +39,16 @@ std::size_t TradingEngine::run_once() {
         const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
 
         // 更新延迟统计
-        latency_sum_ns_ += static_cast<uint64_t>(ns);
-        if (static_cast<uint64_t>(ns) > latency_max_ns_) latency_max_ns_ = static_cast<uint64_t>(ns);
+        const auto uns = static_cast<uint64_t>(ns);
+        latency_sum_ns_ += uns;
+        if (uns > latency_max_ns_) latency_max_ns_ = uns;
+
+        // 记入直方图桶：找到第一个桶上界 > uns 的位置
+        std::size_t bucket = kHistBuckets - 1;
+        for (std::size_t b = 0; b < kHistBounds.size(); ++b) {
+            if (uns < kHistBounds[b]) { bucket = b; break; }
+        }
+        ++latency_hist_[bucket];
         ++ticks_processed_;
         ++count;
 
@@ -82,6 +91,30 @@ void TradingEngine::cancel_order(uint64_t order_id) {
 
 int32_t TradingEngine::position(uint64_t instrument_id) const noexcept {
     return risk_.current_position(instrument_id);
+}
+
+uint64_t TradingEngine::latency_percentile_ns(double pct) const noexcept {
+    if (ticks_processed_ == 0) return 0;
+
+    // 目标计数（向上取整）
+    const uint64_t target = static_cast<uint64_t>(pct / 100.0 * ticks_processed_ + 0.5);
+    uint64_t cumulative = 0;
+
+    // 桶下界（前一桶的上界，首桶为 0）
+    uint64_t lo = 0;
+    for (std::size_t b = 0; b < kHistBuckets; ++b) {
+        cumulative += latency_hist_[b];
+        const uint64_t hi = (b < kHistBounds.size()) ? kHistBounds[b] : latency_max_ns_;
+        if (cumulative >= target) {
+            // 在 [lo, hi) 内线性插值
+            if (latency_hist_[b] == 0) return lo;
+            const double frac = static_cast<double>(target - (cumulative - latency_hist_[b]))
+                                / static_cast<double>(latency_hist_[b]);
+            return lo + static_cast<uint64_t>(frac * static_cast<double>(hi - lo));
+        }
+        lo = hi;
+    }
+    return latency_max_ns_;
 }
 
 void TradingEngine::on_fill(const ExecutionReport& report) {

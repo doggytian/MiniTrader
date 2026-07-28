@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -88,6 +90,24 @@ public:
     /// on_tick() 峰值耗时（纳秒）。
     [[nodiscard]] uint64_t latency_max_ns() const noexcept { return latency_max_ns_; }
 
+    // ─── 延迟直方图（on_tick 耗时分布）────────────────────────
+    /// 直方图桶上界（纳秒），共 kHistBuckets 个桶：
+    ///   [0,100) [100,200) [200,500) [500,1000) [1µs,5µs) [5µs,10µs) [10µs,100µs) [≥100µs]
+    static constexpr std::size_t kHistBuckets = 8;
+    static constexpr std::array<uint64_t, kHistBuckets - 1> kHistBounds = {
+        100, 200, 500, 1'000, 5'000, 10'000, 100'000  // 纳秒上界
+    };
+
+    /// 返回各桶计数（只读）。
+    [[nodiscard]] const std::array<uint64_t, kHistBuckets>& latency_histogram() const noexcept {
+        return latency_hist_;
+    }
+
+    /// 计算延迟百分位数（纳秒），基于直方图线性插值。
+    /// @param pct 百分比，如 50.0 / 99.0 / 99.9
+    /// @return 估算延迟（纳秒），无样本时返回 0
+    [[nodiscard]] uint64_t latency_percentile_ns(double pct) const noexcept;
+
     [[nodiscard]] const OrderBook& order_book() const noexcept { return book_; }
     [[nodiscard]] const RiskGate&  risk_gate()  const noexcept { return risk_; }
 
@@ -113,6 +133,7 @@ private:
     // 延迟统计（on_tick 挂钟时间，纳秒）
     uint64_t latency_sum_ns_{0};
     uint64_t latency_max_ns_{0};
+    std::array<uint64_t, kHistBuckets> latency_hist_{};
 };
 
 }  // namespace minitrader

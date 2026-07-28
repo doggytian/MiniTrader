@@ -74,6 +74,12 @@ void MarketReceiver::run() {
     running_ = true;
     std::string line;
 
+    // 回放基准：记录第一条 tick 的 exchange_timestamp_ns 和本地时钟，
+    // 后续每条 tick 根据相对时间差决定是否 sleep（按真实间隔回放）。
+    bool     first_tick        = true;
+    uint64_t base_exchange_ns  = 0;
+    uint64_t base_local_ns     = 0;
+
     while (running_ && std::getline(f, line)) {
         if (line.empty() || line[0] == '#') continue;  // 跳过空行和注释
         // 跳过表头行（首字符为字母）
@@ -94,16 +100,36 @@ void MarketReceiver::run() {
             continue;
         }
 
-        tick.exchange_timestamp_ns = Order::now_ns();
-        tick.local_timestamp_ns    = Order::now_ns();
+        // 尝试解析可选的 exchange_timestamp_ns 列（向后兼容旧格式）
+        uint64_t exchange_ts = 0;
+        char comma2 = 0;
+        if (ss >> comma2 >> exchange_ts) {
+            tick.exchange_timestamp_ns = exchange_ts;
+        } else {
+            tick.exchange_timestamp_ns = Order::now_ns();
+        }
+
+        // 按真实 tick 间隔回放：首条 tick 建立时钟基准，后续按偏移量 sleep
+        if (first_tick) {
+            base_exchange_ns = tick.exchange_timestamp_ns;
+            base_local_ns    = Order::now_ns();
+            first_tick       = false;
+        } else if (tick.exchange_timestamp_ns > base_exchange_ns) {
+            // 计算该 tick 应在何时到达（基于本地基准时钟）
+            const uint64_t target_local_ns =
+                base_local_ns + (tick.exchange_timestamp_ns - base_exchange_ns);
+            const uint64_t now = Order::now_ns();
+            if (target_local_ns > now) {
+                std::this_thread::sleep_for(
+                    std::chrono::nanoseconds(target_local_ns - now));
+            }
+        }
+
+        // local_timestamp_ns：sleep 结束后、callback 前立即打时间戳，
+        // 模拟行情到达本地的时刻；local - exchange = 端到端传输延迟（模拟网络时延）
+        tick.local_timestamp_ns = Order::now_ns();
 
         if (callback_) callback_(tick);
-
-        // 按配置的回放间隔控制速度（微秒），0 表示不等待
-        if (config_.recv_buf_size > 0) {
-            std::this_thread::sleep_for(
-                std::chrono::microseconds(config_.recv_buf_size));
-        }
     }
     running_ = false;
 #endif
