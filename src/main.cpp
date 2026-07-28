@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -178,6 +179,143 @@ static void run_recv_mode(const char* csv_path) {
     }
 }
 
+// ── 真实速率回放模式 ──────────────────────────────────────────────────────────
+// 用法：./minitrader_demo --realtime <csv文件路径> [speed_multiplier]
+//
+// 设计目标：测量"真实报文速率下的排队延迟（背压）"，弥补全速回放只测逻辑吞吐上限的盲区。
+//
+// 架构：
+//   生产者线程（producer）：按 CSV exchange_timestamp_ns 间隔 sleep_until，push_tick；
+//                           队列满时 ticks_dropped++ 并继续（不阻塞）。
+//   消费者（主线程）       ：持续 run_once() 排空队列，同时计逻辑延迟 + 排队延迟。
+//
+// 关键指标：
+//   on_tick 逻辑延迟  ─ 与全速回放一致（出队→策略返回），反映纯业务路径
+//   排队延迟（queue wait） ─ 出队时刻 - 入队时刻，反映背压/积压
+//   丢包率            ─ ticks_dropped / total_sent，超 0.1% 说明消费跟不上
+//
+// speed_multiplier > 1 加速（2 = 2× 速率，压测用）；默认 1.0（原速）。
+static void run_realtime_mode(const char* csv_path, double speed = 1.0) {
+    using Clock = std::chrono::steady_clock;
+
+    std::printf("=== MiniTrader 真实速率回放（speed=%.1fx）===\n", speed);
+    std::printf("文件：%s\n\n", csv_path);
+
+    const auto ticks = load_csv(csv_path);
+    if (ticks.size() < 2) {
+        std::fprintf(stderr, "[realtime] CSV 不足 2 条 tick，退出。\n");
+        return;
+    }
+    std::printf("已预读 %zu 条 tick\n", ticks.size());
+
+    // ── 引擎 & 策略 ───────────────────────────────────────────────────────────
+    EngineConfig eng_cfg;
+    eng_cfg.book_config = {.min_price = 1, .max_price = 100000, .tick_size = 1};
+    eng_cfg.risk_config = {.max_position = 500, .max_orders_per_second = 200,
+                           .max_cancel_ratio = 0.9, .check_self_trade = false};
+    TradingEngine engine(eng_cfg);
+    engine.enable_queue_latency_tracking(true);
+
+    SpreadStrategy strategy(SpreadStrategyConfig{
+        .instrument_id = 1, .half_spread = 2, .order_size = 5, .verbose = false,
+    });
+    engine.set_strategy(&strategy);
+    strategy.on_start();
+
+    // ── 生产者线程：按时间戳节流 push ────────────────────────────────────────
+    std::atomic<bool> producer_done{false};
+    uint64_t total_sent = 0;
+
+    std::thread producer([&] {
+        // 找第一个有效时间戳作为基准
+        const uint64_t first_ts = ticks[0].exchange_timestamp_ns;
+        const auto     wall0    = Clock::now();
+
+        for (std::size_t i = 0; i < ticks.size(); ++i) {
+            // 按时间戳计算应推进的目标时刻（speed > 1 则压缩间隔）
+            const uint64_t tick_ts = ticks[i].exchange_timestamp_ns;
+            const uint64_t offset_ns = (tick_ts >= first_ts)
+                ? static_cast<uint64_t>((tick_ts - first_ts) / speed)
+                : 0;
+            const auto target = wall0 + std::chrono::nanoseconds(offset_ns);
+            std::this_thread::sleep_until(target);
+
+            engine.push_tick(ticks[i]);  // 失败时内部 ticks_dropped_++
+            ++total_sent;
+        }
+        producer_done.store(true, std::memory_order_release);
+    });
+
+    // ── 消费者（主线程）：持续排空队列 ───────────────────────────────────────
+    while (!producer_done.load(std::memory_order_acquire)
+           || !engine.tick_queue_empty()) {
+        engine.run_once();
+    }
+    // 最后再排一次，确保 producer 退出后残留的 tick 全处理完
+    engine.run_once();
+
+    producer.join();
+    strategy.on_stop();
+
+    // ── 报告 ─────────────────────────────────────────────────────────────────
+    const uint64_t processed = engine.ticks_processed();
+    const uint64_t dropped   = engine.ticks_dropped();
+    const double   drop_rate = total_sent ? 100.0 * dropped / total_sent : 0.0;
+
+    std::printf("\n── 吞吐统计 ──\n");
+    std::printf("  发送 tick 数   : %llu\n", static_cast<unsigned long long>(total_sent));
+    std::printf("  处理 tick 数   : %llu\n", static_cast<unsigned long long>(processed));
+    std::printf("  丢弃 tick 数   : %llu  (丢包率 %.4f%%)\n",
+                static_cast<unsigned long long>(dropped), drop_rate);
+    std::printf("  已提交订单数   : %llu\n",
+                static_cast<unsigned long long>(engine.orders_submitted()));
+
+    // ── 排队延迟（背压指标）──────────────────────────────────────────────────
+    std::printf("\n── 排队延迟（入队→出队，反映背压）──\n");
+    std::printf("  均值   : %6llu ns\n",
+                static_cast<unsigned long long>(engine.queue_wait_avg_ns()));
+    std::printf("  峰值   : %6llu ns\n",
+                static_cast<unsigned long long>(engine.queue_wait_max_ns()));
+    std::printf("  P50    : %6llu ns\n",
+                static_cast<unsigned long long>(engine.queue_wait_percentile_ns(50.0)));
+    std::printf("  P99    : %6llu ns\n",
+                static_cast<unsigned long long>(engine.queue_wait_percentile_ns(99.0)));
+    std::printf("  P99.9  : %6llu ns\n",
+                static_cast<unsigned long long>(engine.queue_wait_percentile_ns(99.9)));
+
+    static constexpr const char* kQLabels[TradingEngine::kQHistBuckets] = {
+        "<1µs", "<5µs", "<10µs", "<50µs", "<100µs", "<500µs", "<1ms", "≥1ms",
+    };
+    std::printf("\n── 排队延迟直方图 ──\n");
+    for (std::size_t b = 0; b < TradingEngine::kQHistBuckets; ++b) {
+        const auto& qh = engine.queue_wait_histogram();
+        const double pct = processed ? 100.0 * qh[b] / processed : 0.0;
+        const int bar = static_cast<int>(pct / 100.0 * 40);
+        std::printf("  %-8s %6llu (%5.1f%%)  |",
+                    kQLabels[b], static_cast<unsigned long long>(qh[b]), pct);
+        for (int i = 0; i < bar; ++i) std::putchar('#');
+        std::putchar('\n');
+    }
+
+    // ── on_tick 逻辑延迟（与全速回放对比用）────────────────────────────────
+    std::printf("\n── on_tick 逻辑延迟（出队→策略返回）──\n");
+    std::printf("  均值   : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_avg_ns()));
+    std::printf("  P50    : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_percentile_ns(50.0)));
+    std::printf("  P99    : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_percentile_ns(99.0)));
+    std::printf("  P99.9  : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_percentile_ns(99.9)));
+    std::printf("  峰值   : %6llu ns\n",
+                static_cast<unsigned long long>(engine.latency_max_ns()));
+
+    if (drop_rate > 0.1)
+        std::printf("\n[警告] 丢包率 %.4f%% > 0.1%%，消费者跟不上此速率。\n", drop_rate);
+    else
+        std::printf("\n[OK] 丢包率 %.4f%%，消费者可跟上此速率。\n", drop_rate);
+}
+
 // ── Mock 行情模式（默认）─────────────────────────────────────────────────────
 static void run_mock_mode() {
     EngineConfig eng_cfg;
@@ -288,11 +426,16 @@ static void run_mock_mode() {
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────────────
-// 默认 mock 模式：./minitrader_demo
-// CSV 回放模式：  ./minitrader_demo --recv data/sample_ticks.csv
+// 默认 mock 模式：    ./minitrader_demo
+// 全速回放模式：      ./minitrader_demo --recv data/sample_ticks.csv
+// 真实速率回放模式：  ./minitrader_demo --realtime data/sample_ticks.csv [speed]
+//   speed 默认 1.0（原速），speed=2 表示 2× 速率压测
 int main(int argc, char* argv[]) {
     if (argc >= 3 && std::strcmp(argv[1], "--recv") == 0) {
         run_recv_mode(argv[2]);
+    } else if (argc >= 3 && std::strcmp(argv[1], "--realtime") == 0) {
+        const double speed = (argc >= 4) ? std::atof(argv[3]) : 1.0;
+        run_realtime_mode(argv[2], speed > 0.0 ? speed : 1.0);
     } else {
         run_mock_mode();
     }

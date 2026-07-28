@@ -24,15 +24,37 @@ void TradingEngine::set_strategy(StrategyBase* strategy) {
 }
 
 bool TradingEngine::push_tick(const MarketTick& tick) noexcept {
-    return tick_queue_.try_push(tick);
+    if (track_queue_latency_) {
+        // 将入队时刻注入 local_timestamp_ns，供消费者测量排队等待时长
+        MarketTick t = tick;
+        t.local_timestamp_ns = static_cast<uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        if (!tick_queue_.try_push(t)) { ++ticks_dropped_; return false; }
+        return true;
+    }
+    if (!tick_queue_.try_push(tick)) { ++ticks_dropped_; return false; }
+    return true;
 }
 
 std::size_t TradingEngine::run_once() {
     std::size_t count = 0;
     while (auto tick = tick_queue_.try_pop()) {
-        // ── 延迟计时：出队 → on_tick() 返回 ──────────────────────
+        // ── 排队延迟：出队时刻 − 入队时刻 ────────────────────────
         const auto t0 = std::chrono::steady_clock::now();
+        if (track_queue_latency_ && tick->local_timestamp_ns != 0) {
+            const uint64_t now_ns = static_cast<uint64_t>(t0.time_since_epoch().count());
+            const uint64_t wait = (now_ns > tick->local_timestamp_ns)
+                                  ? (now_ns - tick->local_timestamp_ns) : 0;
+            queue_wait_sum_ns_ += wait;
+            if (wait > queue_wait_max_ns_) queue_wait_max_ns_ = wait;
+            std::size_t qb = kQHistBuckets - 1;
+            for (std::size_t b = 0; b < kQHistBounds.size(); ++b) {
+                if (wait < kQHistBounds[b]) { qb = b; break; }
+            }
+            ++queue_wait_hist_[qb];
+        }
 
+        // ── 逻辑延迟：on_tick() 返回 ─────────────────────────────
         if (strategy_) strategy_->on_tick(*tick);
 
         const auto t1 = std::chrono::steady_clock::now();
@@ -115,6 +137,25 @@ uint64_t TradingEngine::latency_percentile_ns(double pct) const noexcept {
         lo = hi;
     }
     return latency_max_ns_;
+}
+
+uint64_t TradingEngine::queue_wait_percentile_ns(double pct) const noexcept {
+    if (ticks_processed_ == 0) return 0;
+    const uint64_t target = static_cast<uint64_t>(pct / 100.0 * ticks_processed_ + 0.5);
+    uint64_t cumulative = 0;
+    uint64_t lo = 0;
+    for (std::size_t b = 0; b < kQHistBuckets; ++b) {
+        cumulative += queue_wait_hist_[b];
+        const uint64_t hi = (b < kQHistBounds.size()) ? kQHistBounds[b] : queue_wait_max_ns_;
+        if (cumulative >= target) {
+            if (queue_wait_hist_[b] == 0) return lo;
+            const double frac = static_cast<double>(target - (cumulative - queue_wait_hist_[b]))
+                                / static_cast<double>(queue_wait_hist_[b]);
+            return lo + static_cast<uint64_t>(frac * static_cast<double>(hi - lo));
+        }
+        lo = hi;
+    }
+    return queue_wait_max_ns_;
 }
 
 void TradingEngine::on_fill(const ExecutionReport& report) {

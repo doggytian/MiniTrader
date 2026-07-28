@@ -86,6 +86,57 @@ static void BM_EngineTickWithOrder(benchmark::State& state) {
 }
 BENCHMARK(BM_EngineTickWithOrder);
 
+// ── BM_EngineTickRequote ──────────────────────────────────────────────────────
+// 路径B：每 tick 都撤单重新报价（cancel×2 + submit×2）。
+// 策略的 early-return 条件是 bid_order_id_ != 0，因此需要在 PauseTiming 内
+// 清掉 order_id，让下一个 tick 必然走完整报价路径。
+// 与 BM_EngineTickNoOrder 差值 = cancel×2 + submit×2（2× 风控 + 2× 簿操作）的增量开销。
+static void BM_EngineTickRequote(benchmark::State& state) {
+    TradingEngine  engine(make_config());
+    SpreadStrategy strategy(make_strategy_cfg());
+    engine.set_strategy(&strategy);
+
+    int64_t px = 9998;
+    for (auto _ : state) {
+        // 计时：空簿 → submit×2
+        std::ignore = engine.push_tick(make_tick(px, px + 4));
+        std::ignore = engine.run_once();
+
+        // 非计时：撤掉刚报的双边挂单，下次迭代重新触发报价
+        state.PauseTiming();
+        strategy.cancel_resting_quotes(engine);
+        ++px;
+        if (px > 10000) px = 9990;  // 价格环绕，避免越界
+        state.ResumeTiming();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_EngineTickRequote);
+
+// ── BM_StrategyOnTickOnly ─────────────────────────────────────────────────────
+// 纯策略逻辑开销：绕开 SPSC + OrderBook + RiskGate，直接调用 on_tick()。
+// 用来隔离"策略本身（EMA + skew 计算 + 条件判断）"占总延迟的比例。
+static void BM_StrategyOnTickOnly(benchmark::State& state) {
+    // 用一个"永远不会下单"的空引擎支撑策略调用，但不经过 SPSC
+    TradingEngine  engine(make_config());
+    SpreadStrategy strategy(make_strategy_cfg());
+    engine.set_strategy(&strategy);
+
+    // 预热：先触发一次，让 ema_initialized_ = true，进入稳态
+    MarketTick tick = make_tick(9998, 10002);
+    strategy.on_tick(tick);
+    // 清掉下出去的单，让后续 on_tick 走"已有挂单→return"快路径
+    strategy.cancel_resting_quotes(engine);
+    std::ignore = engine.push_tick(tick); std::ignore = engine.run_once();
+
+    for (auto _ : state) {
+        strategy.on_tick(tick);
+        benchmark::ClobberMemory();
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_StrategyOnTickOnly);
+
 // ── BM_EngineLatencyHistogram ─────────────────────────────────────────────────
 // Collects N per-tick wall-clock samples and reports percentile distribution
 // via benchmark counters.  Measures the full push_tick + run_once round-trip.

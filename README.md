@@ -68,8 +68,10 @@ cmake --build build --parallel
 | OrderBook add\_order（单价位） | **43 ns** | |
 | OrderBook cancel\_order（O(1)） | **24 ns** | unordered\_map 查找 + list::erase |
 | OrderBook 撮合（深度 ≥ 10） | **~450 ns** | 1 笔进场 vs N 笔挂单 |
-| **全路径：行情到策略返回（不下单）** | **~64 ns** | SPSC 出队 + on\_tick 返回（Google Benchmark 框架计时） |
-| **全路径：行情到双边下单** | **~784 ns** | + 2× 风控检查 + 2× 撮合簿插入 |
+| **路径A：行情到策略返回（挂单已存在，不下单）** | **~68 ns** | SPSC 出队 + on\_tick 快路径返回 |
+| **路径B：行情到双边重新报价（submit×2）** | **~706 ns** | + 2×`RiskGate.check()`(持仓/限频/自成交风控) + 2×`OrderBook.add_order()`(挂单入簿) + 2×`Order::now_ns()`(打时间戳) + 2×`risk_.track_order()`(登记活跃单) |
+| **路径B（含 cancel×2）** | **~706 ns** | cancel(`cancel_order`：哈希查 + list::erase) 和 submit(`submit_order`) 耗时相当，差值在误差范围内 |
+| **纯策略逻辑（EMA + skew 计算）** | **~2.1 ns** | 绕开 SPSC/OrderBook，直接调 on\_tick |
 
 ### 延迟分位数
 
@@ -92,6 +94,22 @@ cmake --build build --parallel
 >（macOS 上单次调用约数十 ns）。`BM_EngineTickNoOrder`（框架自动计时）的 ~64ns
 > 与 `BM_EngineLatencyHistogram` P50=83ns 的差值即为两次手动计时的成本。
 > 峰值 ~29 µs 为 OS 调度抖动，非应用逻辑。
+
+### 测量边界与业界差距
+
+本项目的延迟数字衡量的是**纯交易逻辑路径**（SPSC 出队 → 策略 `on_tick` → 风控 → 下单），
+属于应用层分解测量的第一段，**并非业界意义的端到端 Tick-to-Trade（T2T，wire-to-wire）**。
+
+| 维度 | 本项目 | 业界生产标准 |
+|------|--------|-------------|
+| 计时范围 | 出队后 → 下单前 | 网卡收包 → 网卡发包（wire-to-wire） |
+| 时间戳来源 | 软件 `steady_clock`（含 OS 抖动） | NIC 硬件时间戳（Solarflare / Mellanox） |
+| 核心隔离 | 未绑核 / 未固定频率 | 绑核 + 关超线程 + 固定频率 + 核隔离 |
+| 网络栈 | epoll / CSV 回放 | 内核旁路（Onload / DPDK / RDMA） |
+| 并发模型 | 单线程 demo | 多核争用 / NUMA 实测 |
+
+因此这些数字用于**横向对比自身优化前后、展示设计 trade-off** 是可信的；但**不可直接对标
+生产 T2T 指标**。要接真实对标，需引入 NIC 硬件时间戳做 wire-to-wire，属生产级投入，demo 阶段不做。
 
 ## 项目结构
 

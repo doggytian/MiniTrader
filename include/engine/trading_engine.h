@@ -96,6 +96,10 @@ public:
         latency_max_ns_ = 0;
         latency_hist_.fill(0);
         ticks_processed_ = 0;
+        ticks_dropped_ = 0;
+        queue_wait_sum_ns_ = 0;
+        queue_wait_max_ns_ = 0;
+        queue_wait_hist_.fill(0);
     }
 
     // ─── 延迟直方图（on_tick 耗时分布）────────────────────────
@@ -116,6 +120,31 @@ public:
     /// @param pct 百分比，如 50.0 / 99.0 / 99.9
     /// @return 估算延迟（纳秒），无样本时返回 0
     [[nodiscard]] uint64_t latency_percentile_ns(double pct) const noexcept;
+
+    // ─── 排队延迟统计（入队→出队，反映背压/积压）──────────────
+    /// 启用排队延迟测量：push_tick 时将入队时刻写入 local_timestamp_ns，
+    /// run_once 出队后计算等待时长。仅在双线程真实速率回放时有意义。
+    void enable_queue_latency_tracking(bool on) noexcept { track_queue_latency_ = on; }
+
+    [[nodiscard]] uint64_t ticks_dropped()       const noexcept { return ticks_dropped_; }
+    [[nodiscard]] uint64_t queue_wait_avg_ns()   const noexcept {
+        return ticks_processed_ ? queue_wait_sum_ns_ / ticks_processed_ : 0;
+    }
+    [[nodiscard]] uint64_t queue_wait_max_ns()   const noexcept { return queue_wait_max_ns_; }
+    [[nodiscard]] uint64_t queue_wait_percentile_ns(double pct) const noexcept;
+
+    /// 排队延迟直方图桶上界（µs 量级，比逻辑延迟粗一档）：
+    ///   [0,1µs) [1,5µs) [5,10µs) [10,50µs) [50,100µs) [100,500µs) [500µs,1ms) [≥1ms]
+    static constexpr std::size_t kQHistBuckets = 8;
+    static constexpr std::array<uint64_t, kQHistBuckets - 1> kQHistBounds = {
+        1'000, 5'000, 10'000, 50'000, 100'000, 500'000, 1'000'000
+    };
+    [[nodiscard]] const std::array<uint64_t, kQHistBuckets>& queue_wait_histogram() const noexcept {
+        return queue_wait_hist_;
+    }
+
+    /// 近似判断 tick 队列是否为空（供消费者 spin 退出用）。
+    [[nodiscard]] bool tick_queue_empty() const noexcept { return tick_queue_.empty(); }
 
     [[nodiscard]] const OrderBook& order_book() const noexcept { return book_; }
     [[nodiscard]] const RiskGate&  risk_gate()  const noexcept { return risk_; }
@@ -138,11 +167,18 @@ private:
     uint64_t orders_submitted_{0};
     uint64_t orders_rejected_{0};
     uint64_t fills_received_{0};
+    uint64_t ticks_dropped_{0};     // push_tick 因队列满而丢弃的 tick 数
 
-    // 延迟统计（on_tick 挂钟时间，纳秒）
+    // on_tick 逻辑延迟统计（纳秒）
     uint64_t latency_sum_ns_{0};
     uint64_t latency_max_ns_{0};
     std::array<uint64_t, kHistBuckets> latency_hist_{};
+
+    // 排队延迟统计（入队→出队，反映背压）
+    bool     track_queue_latency_{false};
+    uint64_t queue_wait_sum_ns_{0};
+    uint64_t queue_wait_max_ns_{0};
+    std::array<uint64_t, kQHistBuckets> queue_wait_hist_{};
 };
 
 }  // namespace minitrader
