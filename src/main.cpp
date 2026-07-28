@@ -97,11 +97,37 @@ static void run_recv_mode(const char* csv_path) {
     // 重置延迟统计（热身数据丢弃）
     engine.reset_latency_stats();
 
-    // 第 1~ROUNDS-1 轮：正式测量
+    // 第 1~ROUNDS-1 轮：正式测量。
+    // 每处理 N 个 tick 注入一个外部激进单（交叉 mid ± half_spread），
+    // 触发策略挂单成交 → on_fill → cancel 对侧单，让延迟路径分化。
+    constexpr int INJECT_EVERY = 18;  // ~5.5% 的 tick 后注入，模拟偶尔的市场冲击
+    uint64_t inject_id = 9000000;
+
     for (int r = 1; r < ROUNDS; ++r) {
+        int tick_idx = 0;
         for (const auto& tick : ticks) {
+            // 正常 tick 处理（报价 / 检查挂单状态）
             std::ignore = engine.push_tick(tick);
             std::ignore = engine.run_once();
+
+            // 每隔 N tick 注外部激进单，模拟瞬间市场冲击
+            if (++tick_idx % INJECT_EVERY == 0) {
+                const int64_t mid = (tick.bid_price + tick.ask_price) / 2;
+                // 交替方向：买方冲击（打 sell）还是卖方冲击（打 buy）
+                if (r % 2 == 0) {
+                    // 外部激进买单 @ mid+2 → 打到策略的挂卖单
+                    engine.submit_order(Order{
+                        ++inject_id, tick.instrument_id,
+                        mid + 2, 5, Side::Buy,
+                        OrderType::Limit, 0, Order::now_ns()});
+                } else {
+                    // 外部激进卖单 @ mid-2 → 打到策略的挂买单
+                    engine.submit_order(Order{
+                        ++inject_id, tick.instrument_id,
+                        mid - 2, 5, Side::Sell,
+                        OrderType::Limit, 0, Order::now_ns()});
+                }
+            }
         }
     }
 
@@ -135,7 +161,8 @@ static void run_recv_mode(const char* csv_path) {
     const auto& hist = engine.latency_histogram();
     const uint64_t total = engine.ticks_processed();
     static constexpr const char* kLabels[TradingEngine::kHistBuckets] = {
-        "<100ns", "<200ns", "<500ns", "<1µs",
+        "<25ns",  "<50ns", "<75ns", "<100ns",
+        "<200ns", "<500ns", "<1µs",
         "<5µs",   "<10µs",  "<100µs", "≥100µs",
     };
     for (std::size_t b = 0; b < TradingEngine::kHistBuckets; ++b) {

@@ -100,10 +100,11 @@ public:
 
     // ─── 延迟直方图（on_tick 耗时分布）────────────────────────
     /// 直方图桶上界（纳秒），共 kHistBuckets 个桶：
-    ///   [0,100) [100,200) [200,500) [500,1000) [1µs,5µs) [5µs,10µs) [10µs,100µs) [≥100µs]
-    static constexpr std::size_t kHistBuckets = 8;
+    ///   [0,25) [25,50) [50,75) [75,100) [100,200) [200,500) [500,1µs) [1µs,5µs) [5µs,10µs) [10µs,100µs) [≥100µs]
+    /// 前 4 个桶细分到 25ns，匹配 macOS arm64 steady_clock 典型精度（~24-41ns）。
+    static constexpr std::size_t kHistBuckets = 11;
     static constexpr std::array<uint64_t, kHistBuckets - 1> kHistBounds = {
-        100, 200, 500, 1'000, 5'000, 10'000, 100'000  // 纳秒上界
+        25, 50, 75, 100, 200, 500, 1'000, 5'000, 10'000, 100'000  // 纳秒上界
     };
 
     /// 返回各桶计数（只读）。
