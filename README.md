@@ -95,6 +95,43 @@ cmake --build build --parallel
 > 与 `BM_EngineLatencyHistogram` P50=83ns 的差值即为两次手动计时的成本。
 > 峰值 ~29 µs 为 OS 调度抖动，非应用逻辑。
 
+### 耗时拆解：68ns 与 706ns 各花在哪
+
+两个端点数字（`./build/engine_bench` 可复现）的精确归因：
+
+**路径A ≈ 68ns（挂单已存在，on_tick 直接 return）**
+
+```text
+~68ns = SPSC 进出队(~5ns)          ← 取 tick（try_push + try_pop）
+      + on_tick 快路径(~2ns)       ← EMA 更新 + 2 次比较 + early return
+      + run_once 计时打点(~45ns)    ← 2× steady_clock::now()(t0/t1)，纯测量用，与业务无关
+      + 直方图分桶 + 计数器(~10ns)  ← 延迟统计记账
+      + 其余调用开销(~6ns)
+```
+
+占比：**计时打点 ~66%**、统计记账 ~15%、SPSC ~7%、策略逻辑 ~3%。
+
+**路径B ≈ 706ns（空簿 → 双边重新报价 submit×2）**
+
+```text
+~706ns = 路径A基础(~68ns)
+       + submit_order ×2 增量(~638ns):
+            Order::now_ns() ×2        ≈ 60ns   (取时间戳，给订单打本地时刻)
+            RiskGate.check() ×2       ≈ 50ns   (持仓/限频/自成交，O(1) 哈希查找，不过则丢弃)
+            risk_.track_order() ×2    ≈ 80ns   (插入 active_orders_ 哈希表，登记活跃挂单)
+            OrderBook.add_order() ×2  ≈ 172ns  (按价格算数组下标 + list push_back 入价位队列)
+            其余(submit_order 调用包装 + 簿内 best 维护 + virtual 调度) ≈ 276ns
+```
+
+占比：路径A基础 10%、OrderBook 插入 24%、track_order 11%、计时打点（含 submit 内 now_ns）~15%、RiskGate 7%、其余 39%。
+
+**关键洞察**
+
+- **不挂单时耗时主要在"测量自己"**：路径A 里 66% 是 `run_once` 的两次 `steady_clock` 打点。真实业务净开销仅 ~10ns（取 tick + 决策）。若生产不每 tick 打两钟（改为抽样或仅边界打点），快路径会塌到 ~10ns 量级——这正说明 demo 的"测自己"开销不可忽视，也是上一节"计时开销含在测量区间内"的具象化。
+- **策略逻辑几乎不占时间**：`on_tick` 本身（EMA + 判断）仅 ~2ns，占路径A 的 3%、路径B 的 0.3%。换策略只会改变"走哪条路径、走几次 submit"，基础设施开销（SPSC / OrderBook / RiskGate / 计时）是固定的。
+- **下单增量的瓶颈在 OrderBook**：路径B 比路径A 多的 638ns 里，OrderBook 插入（24%）是最大单项，风控/登记各约 10%。优化下单延迟应优先瞄 OrderBook 与簿内 best 维护，而非策略计算。
+- **混合分位数会误导**：全速回放 P50=22ns 是路径A（占 56%）拉低的，不代表任何单条路径。汇报性能时务必拆端点到路径，而非给一个混合 P50。
+
 ### 测量边界与业界差距
 
 本项目的延迟数字衡量的是**纯交易逻辑路径**（SPSC 出队 → 策略 `on_tick` → 风控 → 下单），
