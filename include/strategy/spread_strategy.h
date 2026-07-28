@@ -11,23 +11,41 @@ class TradingEngine;  // 供 cancel_resting_quotes 使用的前向声明
 /// 价差做市策略配置。
 struct SpreadStrategyConfig {
     uint64_t instrument_id{1};
-    int64_t  half_spread{1};   // 报价偏离中间价的 tick 数（单侧）
-    int32_t  order_size{10};   // 每侧报价数量（手）
-    bool     verbose{true};    // 是否打印报价 / 成交日志
+    int64_t  half_spread{2};      // 基础报价半价差（tick 数）
+    int32_t  order_size{10};      // 每侧报价数量（手）
+    bool     verbose{true};       // 是否打印报价 / 成交日志
+
+    // ── inventory skew ───────────────────────────────────────
+    // 每持有 1 手净多头，将报价中间价向下偏移 skew_per_lot tick，
+    // 使卖出更容易、买入更难，从而驱动持仓回归零。
+    // 净空头时方向相反（中间价上移）。
+    int32_t  max_position{20};    // 净持仓绝对值超过此值时暂停双边报价
+    double   skew_per_lot{0.3};   // 每手持仓产生的中间价偏移（tick）
+
+    // ── 波动率自适应 spread ───────────────────────────────────
+    // 用市场价差（ask-bid）的指数移动平均（EMA）近似短期波动率。
+    // 当前市场价差 > ema_spread * spread_scale_threshold 时，
+    // 将 half_spread 乘以 spread_scale_factor 加宽，减少逆向选择。
+    double   ema_alpha{0.05};              // EMA 平滑系数（越小越平滑）
+    double   spread_scale_threshold{1.8};  // 触发加宽的市场价差倍数
+    double   spread_scale_factor{1.6};     // 加宽倍率
 };
 
-/// 简单价差做市策略。
+/// 价差做市策略（生产简化版）。
 ///
-/// 逻辑：
-///   每个 tick，若双侧均无挂单：
-///     - 在 (mid - half_spread) 挂买单
-///     - 在 (mid + half_spread) 挂卖单
-///   成交后：
-///     - 撤销未成交的对侧单（防止单侧持仓积累）
-///     - 等待下一个 tick 重新双边报价
+/// 在最小骨架基础上增加两项核心机制：
 ///
-/// 这是做市策略的最小骨架，刻意省略了：
-/// 持仓倾斜（inventory skew）、逆向选择过滤、手续费建模等生产级细节。
+/// 1. Inventory Skew（持仓偏斜）
+///    净多头时中间价下移 → 报价向卖方倾斜 → 加速平仓；
+///    净空头时中间价上移 → 报价向买方倾斜 → 加速平仓。
+///    净持仓超过 max_position 时暂停新报价，等待成交降仓。
+///
+/// 2. Volatility-Adaptive Spread（波动率自适应价差）
+///    监控市场实时价差的 EMA，市场价差突然扩大（逆向选择风险上升）
+///    时自动加宽我方报价区间，牺牲成交频率换取被套概率降低。
+///
+/// 仍未包含的生产级细节：多档挂单、信号过滤、手续费建模、
+/// 滑点/latency 补偿、动态调整 order_size 等。
 class SpreadStrategy : public StrategyBase {
 public:
     explicit SpreadStrategy(SpreadStrategyConfig cfg = {}) : cfg_(cfg) {}
@@ -39,7 +57,7 @@ public:
     void on_fill(const ExecutionReport& report) override;
     void on_stop() override;
 
-    /// 撤销当前活跃报价并重置内部 ID（供 benchmark 使用）。
+    /// 撤销当前活跃报价并重置内部 ID（供 benchmark / 清仓使用）。
     void cancel_resting_quotes(TradingEngine& engine);
 
 private:
@@ -55,6 +73,10 @@ private:
     // 盈亏跟踪（tick × 手，非真实货币）
     int64_t  realized_pnl_{0};
     int32_t  fill_count_{0};
+
+    // 波动率代理：市场价差（ask-bid）的 EMA
+    double   ema_spread_{0.0};   // 首个 tick 直接初始化
+    bool     ema_initialized_{false};
 };
 
 }  // namespace minitrader
