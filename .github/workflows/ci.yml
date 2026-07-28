@@ -7,9 +7,10 @@ on:
     branches: [ main ]
 
 jobs:
+  # ── Job 1: Release 构建 + 常规测试（Ubuntu + macOS）────────────────────────
   build-and-test:
     strategy:
-      fail-fast: false   # let both matrix jobs run independently
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         build_type: [Release]
@@ -59,3 +60,45 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  # ── Job 2: Sanitizer 构建（仅 Ubuntu，TSan + ASan 各一次）─────────────────
+  # ThreadSanitizer：捕获 SPSC 无锁队列的 data race（x86 TSO 下运行期不触发，
+  #   但 TSan 按 C++ 内存模型静态分析，能发现 relaxed/release 误用）。
+  # AddressSanitizer：捕获 cancel_order use-after-free 等内存错误。
+  sanitizers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y cmake libgtest-dev
+          cd /usr/src/googletest
+          sudo cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          sudo cmake --build build --parallel
+          sudo cmake --install build
+
+      - name: Configure (${{ matrix.sanitizer }}san)
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DMINITRADER_BUILD_TESTS=ON \
+            -DMINITRADER_BUILD_BENCH=OFF \
+            -DCMAKE_CXX_FLAGS="-fsanitize=${{ matrix.sanitizer }} -fno-omit-frame-pointer -g"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test (with ${{ matrix.sanitizer }}san)
+        run: ctest --test-dir build --output-on-failure
+        env:
+          # TSan: 抑制 GTest 内部的已知误报
+          TSAN_OPTIONS: "halt_on_error=1 suppressions="
+          # ASan: 发现 leak 即报错
+          ASAN_OPTIONS: "halt_on_error=1 detect_leaks=1"

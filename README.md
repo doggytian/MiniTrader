@@ -41,6 +41,7 @@
 ```bash
 ./scripts/build.sh      # 编译（默认 Release，可传 Debug）
 ./scripts/run.sh        # 运行交易 demo（含 per-tick 延迟输出）
+./scripts/replay.sh     # 真实 tick 序列回放（990000 次样本延迟报告）
 ./scripts/test.sh       # 运行全量单元测试
 ./scripts/bench.sh      # 运行全部 benchmark（含 P99 histogram）
 ./scripts/clean.sh      # 清理 build 目录
@@ -67,20 +68,30 @@ cmake --build build --parallel
 | OrderBook add\_order（单价位） | **43 ns** | |
 | OrderBook cancel\_order（O(1)） | **24 ns** | unordered\_map 查找 + list::erase |
 | OrderBook 撮合（深度 ≥ 10） | **~450 ns** | 1 笔进场 vs N 笔挂单 |
-| **全路径：行情到策略返回（不下单）** | **65 ns** | SPSC 出队 + on\_tick 返回 |
-| **全路径：行情到双边下单** | **735 ns** | + 2× 风控检查 + 2× 撮合簿插入 |
+| **全路径：行情到策略返回（不下单）** | **~64 ns** | SPSC 出队 + on\_tick 返回（Google Benchmark 框架计时） |
+| **全路径：行情到双边下单** | **~784 ns** | + 2× 风控检查 + 2× 撮合簿插入 |
 
-### 延迟分位数（10 万次稳态采样）
+### 延迟分位数
+
+**① Google Benchmark 手动计时（10 万次稳态采样，含计时开销）**
 
 | P50 | P90 | P99 | P99.9 | 峰值 |
 |-----|-----|-----|-------|------|
-| 83 ns | 84 ns | 125 ns | 167 ns | ~14 µs |
+| 83 ns | 84 ns | 125 ns | 292 ns | ~30 µs |
 
-> **Profiling 说明**：`sample` 调用栈分析（`docs/engine_sample_profile.txt`）显示，
-> histogram benchmark 中约 80% 的采样时间花在 `steady_clock::now()` →
-> `mach_continuous_time`（即计时开销本身），实际业务逻辑（on\_tick + SPSC 出队）
-> 仅约 6 ns/次，与 `BM_EngineTickNoOrder` 的 **65 ns**（含两次计时调用）一致。
-> 峰值 ~14 µs 为 OS 调度抖动，非应用逻辑。
+**② 真实 tick 序列驱动回放（990000 次样本，`./scripts/replay.sh` 可复现）**
+
+| P50 | P99 | P99.9 | 峰值 |
+|-----|-----|-------|------|
+| 22 ns | 49 ns | 80 ns | ~29 µs |
+
+回放测量的两段分布有业务含义：56% 落在 <25ns（挂单已存在，纯检查路径）；
+44% 落在 <50ns（cancel 旧单 + 双边重新报价路径）。
+
+> **计时说明**：Benchmark 手动打两次 `steady_clock::now()` 的开销已包含在测量区间内
+>（macOS 上单次调用约数十 ns）。`BM_EngineTickNoOrder`（框架自动计时）的 ~64ns
+> 与 `BM_EngineLatencyHistogram` P50=83ns 的差值即为两次手动计时的成本。
+> 峰值 ~29 µs 为 OS 调度抖动，非应用逻辑。
 
 ## 项目结构
 
