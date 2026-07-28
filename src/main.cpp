@@ -1,39 +1,81 @@
 #include <cstdio>
 #include <cstdint>
-#include <tuple>
-#include <thread>
-#include <chrono>
-
-#include "engine/trading_engine.h"
-#include "strategy/spread_strategy.h"
-
-using namespace minitrader;
-
-#include <cstdio>
-#include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <tuple>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 #include "engine/trading_engine.h"
 #include "network/market_receiver.h"
+#include "orderbook/order.h"
 #include "strategy/spread_strategy.h"
 
 using namespace minitrader;
 
+// ── CSV 预读：将 CSV 解析为 tick 列表（与 MarketReceiver 格式兼容）──────────
+static std::vector<MarketTick> load_csv(const char* path) {
+    std::vector<MarketTick> ticks;
+    std::ifstream f(path);
+    if (!f.is_open()) {
+        std::fprintf(stderr, "[replay] 无法打开文件：%s\n", path);
+        return ticks;
+    }
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        if (line[0] < '0' || line[0] > '9') continue;  // 跳过表头
+        std::istringstream ss(line);
+        MarketTick tick{};
+        char comma;
+        if (!(ss >> tick.instrument_id >> comma
+                 >> tick.bid_price    >> comma
+                 >> tick.ask_price    >> comma
+                 >> tick.bid_size     >> comma
+                 >> tick.ask_size     >> comma
+                 >> tick.last_price   >> comma
+                 >> tick.last_size)) continue;
+        uint64_t ts = 0; char c2 = 0;
+        tick.exchange_timestamp_ns = (ss >> c2 >> ts) ? ts : 0;
+        ticks.push_back(tick);
+    }
+    return ticks;
+}
+
 // ── CSV 回放模式 ──────────────────────────────────────────────────────────────
 // 用法：./minitrader_demo --recv <csv文件路径>
-// MarketReceiver 逐行读取 CSV，每条 tick 推入引擎，策略实时响应。
+//
+// 两阶段设计：
+//   1. 热身（第 1 轮）：策略建仓、icache/dcache 预热，不计入统计。
+//   2. 测量（后续 ROUNDS-1 轮）：纯业务路径，无 sleep，保证足够样本量。
+//      99 行 × 99 轮 ≈ 9801 次，P99 = 第 9703 名，P99.9 = 第 9791 名，统计可信。
+//
+// 注意：多轮回放不再 sleep（tick 间隔已在 MarketReceiver 场景中验证），
+// 这里测量的是业务逻辑本身的 on_tick 耗时，不混入网络/OS 调度延迟。
 static void run_recv_mode(const char* csv_path) {
-    std::printf("=== MiniTrader CSV 回放模式 ===\n");
+    constexpr int ROUNDS = 100;  // 第 0 轮热身，第 1~99 轮计入统计
+
+    std::printf("=== MiniTrader CSV 回放模式（%d 轮，统计 %d 轮）===\n",
+                ROUNDS, ROUNDS - 1);
     std::printf("文件：%s\n\n", csv_path);
+
+    // 预读全部 tick
+    const auto ticks = load_csv(csv_path);
+    if (ticks.empty()) {
+        std::fprintf(stderr, "[replay] CSV 为空或解析失败，退出。\n");
+        return;
+    }
+    std::printf("已预读 %zu 条 tick，开始 %d 轮回放...\n\n",
+                ticks.size(), ROUNDS);
 
     EngineConfig eng_cfg;
     eng_cfg.book_config        = {.min_price = 1, .max_price = 100000, .tick_size = 1};
     eng_cfg.risk_config        = {.max_position = 500, .max_orders_per_second = 200,
                                   .max_cancel_ratio = 0.9, .check_self_trade = false};
-    eng_cfg.enable_latency_log = false;  // 回放模式关闭逐 tick 打印
+    eng_cfg.enable_latency_log = false;
 
     TradingEngine engine(eng_cfg);
 
@@ -41,37 +83,42 @@ static void run_recv_mode(const char* csv_path) {
         .instrument_id = 1,
         .half_spread   = 2,
         .order_size    = 5,
-        .verbose       = true,
+        .verbose       = false,  // 多轮回放关闭逐条日志
     });
     engine.set_strategy(&strategy);
     strategy.on_start();
 
-    // MarketReceiver 读 CSV，每条 tick 直接推入引擎并立即处理
-    ReceiverConfig recv_cfg;
-    recv_cfg.multicast_group = csv_path;
-    recv_cfg.recv_buf_size   = 0;  // 不加回放延迟
-
-    MarketReceiver receiver(recv_cfg);
-    receiver.set_callback([&](const MarketTick& tick) {
+    // 第 0 轮：热身，不计入延迟统计（让 icache/branch predictor 预热）
+    for (const auto& tick : ticks) {
         std::ignore = engine.push_tick(tick);
         std::ignore = engine.run_once();
-    });
+    }
 
-    receiver.run();  // 同步读完整个 CSV
+    // 重置延迟统计（热身数据丢弃）
+    engine.reset_latency_stats();
+
+    // 第 1~ROUNDS-1 轮：正式测量
+    for (int r = 1; r < ROUNDS; ++r) {
+        for (const auto& tick : ticks) {
+            std::ignore = engine.push_tick(tick);
+            std::ignore = engine.run_once();
+        }
+    }
 
     strategy.on_stop();
 
     // ── 引擎统计 ──────────────────────────────────────────────────────────────
-    std::printf("\n── 引擎统计 ──\n");
-    std::printf("  已处理 tick 数 : %llu\n",
+    std::printf("\n── 引擎统计（%d 轮 × %zu tick = %llu 次调用）──\n",
+                ROUNDS - 1, ticks.size(),
                 static_cast<unsigned long long>(engine.ticks_processed()));
     std::printf("  已提交订单数   : %llu\n",
                 static_cast<unsigned long long>(engine.orders_submitted()));
     std::printf("  已收到成交数   : %llu\n",
                 static_cast<unsigned long long>(engine.fills_received()));
 
-    // ── on_tick() 延迟报告（基于真实 tick 间隔驱动）──────────────────────────
-    std::printf("\n── on_tick() 延迟分布（出队 → 策略返回，真实 tick 序列驱动）──\n");
+    // ── on_tick() 延迟报告 ────────────────────────────────────────────────────
+    std::printf("\n── on_tick() 延迟分布（%llu 次样本，热身 1 轮已丢弃）──\n",
+                static_cast<unsigned long long>(engine.ticks_processed()));
     std::printf("  均值   : %6llu ns\n",
                 static_cast<unsigned long long>(engine.latency_avg_ns()));
     std::printf("  峰值   : %6llu ns\n",

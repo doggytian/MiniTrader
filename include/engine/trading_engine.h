@@ -90,6 +90,14 @@ public:
     /// on_tick() 峰值耗时（纳秒）。
     [[nodiscard]] uint64_t latency_max_ns() const noexcept { return latency_max_ns_; }
 
+    /// 重置所有延迟统计（用于热身轮结束后清零）。
+    void reset_latency_stats() noexcept {
+        latency_sum_ns_ = 0;
+        latency_max_ns_ = 0;
+        latency_hist_.fill(0);
+        ticks_processed_ = 0;
+    }
+
     // ─── 延迟直方图（on_tick 耗时分布）────────────────────────
     /// 直方图桶上界（纳秒），共 kHistBuckets 个桶：
     ///   [0,100) [100,200) [200,500) [500,1000) [1µs,5µs) [5µs,10µs) [10µs,100µs) [≥100µs]
