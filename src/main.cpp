@@ -10,6 +10,7 @@
 #include <chrono>
 #include <vector>
 
+#include "core/thread_utils.h"
 #include "engine/trading_engine.h"
 #include "network/market_receiver.h"
 #include "orderbook/order.h"
@@ -62,6 +63,9 @@ static void run_recv_mode(const char* csv_path) {
     std::printf("=== MiniTrader CSV 回放模式（%d 轮，统计 %d 轮）===\n",
                 ROUNDS, ROUNDS - 1);
     std::printf("文件：%s\n\n", csv_path);
+
+    // 单线程全速回放：主线程同时承担生产者+消费者，绑到 core 0 减少跨核迁移
+    log_pin_result("recv(main)", 0, pin_current_thread_to_core(0));
 
     // 预读全部 tick
     const auto ticks = load_csv(csv_path);
@@ -201,6 +205,10 @@ static void run_realtime_mode(const char* csv_path, double speed = 1.0) {
     std::printf("=== MiniTrader 真实速率回放（speed=%.1fx）===\n", speed);
     std::printf("文件：%s\n\n", csv_path);
 
+    // 双线程绑核：消费者（主线程）→ core 1，生产者 → core 0
+    // 两者绑在不同核上，消除互相抢占；同在一个 NUMA node 保证 SPSC cacheline 传输最短路径
+    log_pin_result("consumer(main)", 1, pin_current_thread_to_core(1));
+
     const auto ticks = load_csv(csv_path);
     if (ticks.size() < 2) {
         std::fprintf(stderr, "[realtime] CSV 不足 2 条 tick，退出。\n");
@@ -227,6 +235,9 @@ static void run_realtime_mode(const char* csv_path, double speed = 1.0) {
     uint64_t total_sent = 0;
 
     std::thread producer([&] {
+        // 生产者绑到 core 0（与消费者 core 1 相邻但独立，SPSC cacheline 跨核传输一跳）
+        log_pin_result("producer", 0, pin_current_thread_to_core(0));
+
         // 找第一个有效时间戳作为基准
         const uint64_t first_ts = ticks[0].exchange_timestamp_ns;
         const auto     wall0    = Clock::now();

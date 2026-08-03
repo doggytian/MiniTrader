@@ -141,12 +141,38 @@ cmake --build build --parallel
 |------|--------|-------------|
 | 计时范围 | 出队后 → 下单前 | 网卡收包 → 网卡发包（wire-to-wire） |
 | 时间戳来源 | 软件 `steady_clock`（含 OS 抖动） | NIC 硬件时间戳（Solarflare / Mellanox） |
-| 核心隔离 | 未绑核 / 未固定频率 | 绑核 + 关超线程 + 固定频率 + 核隔离 |
+| 核心隔离 | CPU 亲和性绑核（`thread_utils.h`）+ 未固定频率 | 绑核 + 关超线程 + 固定频率 + 核隔离 |
 | 网络栈 | epoll / CSV 回放 | 内核旁路（Onload / DPDK / RDMA） |
 | 并发模型 | 单线程 demo | 多核争用 / NUMA 实测 |
 
 因此这些数字用于**横向对比自身优化前后、展示设计 trade-off** 是可信的；但**不可直接对标
 生产 T2T 指标**。要接真实对标，需引入 NIC 硬件时间戳做 wire-to-wire，属生产级投入，demo 阶段不做。
+
+###绑核设计（`include/core/thread_utils.h`）
+
+项目通过 `pin_thread_to_core()` 实现跨平台 CPU 亲和性绑定：
+
+- **Linux**：`sched_setaffinity` **强制绑核**，线程只在指定核上运行，效果确定。
+- **macOS**：`THREAD_AFFINITY_POLICY`亲和性提示 → M1 受限环境回退为
+  `THREAD_EXTENDED_POLICY(timeshare=0)`，使线程脱离 timeshare 队列、降低非自愿上下文切换概率。
+  macOS 内核不暴露"强制绑核"能力，这是平台上限。
+
+**真实速率回放（`--realtime`）的双线程绑核策略**：
+
+```
+生产者线程  → core 0   (sleep_until + push_tick)
+消费者线程  → core 1   (run_once 策略执行)
+```
+
+两线程绑在**不同核、同一 NUMA node** 上：
+- 互相不抢占CPU，消除"生产者和消费者共享一核导致互相推迟"的问题；
+- SPSC 队列的 cacheline 在同 node 内两核间传递，避免跨 socket 的 QPI/UPI 延迟（生产双路机器上差值可达 ~100-200ns）。
+
+启动时会打印绑核结果，例如：
+```
+[pin] consumer(main)→ core 1   OK[macOS/亲和性提示]
+[pin] producer         → core 0   OK  [macOS/亲和性提示]
+```
 
 ## 项目结构
 
