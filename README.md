@@ -148,12 +148,12 @@ cmake --build build --parallel
 因此这些数字用于**横向对比自身优化前后、展示设计 trade-off** 是可信的；但**不可直接对标
 生产 T2T 指标**。要接真实对标，需引入 NIC 硬件时间戳做 wire-to-wire，属生产级投入，demo 阶段不做。
 
-###绑核设计（`include/core/thread_utils.h`）
+### 绑核设计（`include/core/thread_utils.h`）
 
 项目通过 `pin_thread_to_core()` 实现跨平台 CPU 亲和性绑定：
 
 - **Linux**：`sched_setaffinity` **强制绑核**，线程只在指定核上运行，效果确定。
-- **macOS**：`THREAD_AFFINITY_POLICY`亲和性提示 → M1 受限环境回退为
+- **macOS**：`THREAD_AFFINITY_POLICY` 亲和性提示 → M1 受限环境回退为
   `THREAD_EXTENDED_POLICY(timeshare=0)`，使线程脱离 timeshare 队列、降低非自愿上下文切换概率。
   macOS 内核不暴露"强制绑核"能力，这是平台上限。
 
@@ -165,14 +165,44 @@ cmake --build build --parallel
 ```
 
 两线程绑在**不同核、同一 NUMA node** 上：
-- 互相不抢占CPU，消除"生产者和消费者共享一核导致互相推迟"的问题；
+- 互相不抢占，消除"生产者和消费者共享一核导致互相推迟"的问题；
 - SPSC 队列的 cacheline 在同 node 内两核间传递，避免跨 socket 的 QPI/UPI 延迟（生产双路机器上差值可达 ~100-200ns）。
 
 启动时会打印绑核结果，例如：
+
 ```
-[pin] consumer(main)→ core 1   OK[macOS/亲和性提示]
-[pin] producer         → core 0   OK  [macOS/亲和性提示]
+[pin] consumer(main)   → core 1   OK  [Linux/强制绑核]
+[pin] producer         → core 0   OK  [Linux/强制绑核]
 ```
+
+### 绑核优化效果（`--realtime` 真实速率回放，10000tick）
+
+三个阶段的实测对比，排队延迟 = tick入队时刻→出队时刻（反映 OS 调度抖动和背压）：
+
+**排队延迟（入队→出队）**
+
+| 指标 | macOS 无绑核 | macOS 亲和性提示 | Linux 强制绑核 |
+|------|------|------|------|
+| P50 | 596 ns | ~560 ns | **505 ns** |
+| P99 | 34 µs | ~9 µs | **1.5 µs** |
+| P99.9 | — | ~50 µs | **10 µs** |
+| 峰值 | **1.07 ms** | 3.9–7.6 ms | **25.6 µs** |
+| ≥1ms 桶 | 偶发 | 0–3 条 | **0 条** |
+
+**on_tick 逻辑延迟（出队→策略返回）**
+
+| 指标 | macOS 无绑核 | macOS 亲和性提示 | Linux 强制绑核 |
+|------|------|------|------|
+| P50 | 210 ns | ~155 ns | **148 ns** |
+| P99 | 910 ns | ~800 ns | **732 ns** |
+| P99.9 | — | ~6 µs | **980 ns** |
+| 峰值 | 48 µs | 30–95 µs | **12.3 µs** |
+
+**关键结论**：
+
+- **macOS 亲和性提示**：P99 改善显著（排队 34µs→9µs，-73%），但峰值无改善甚至变差——`THREAD_EXTENDED_POLICY` 只是软提示，内核仍可随时换出线程。
+- **Linux 强制绑核**（`sched_setaffinity`）：排队峰值 1.07ms→25µs（**↓ 97%**），≥1ms 桶归零。1.07ms 的根因是消费者线程被OS 换出、tick 在队列里等待，强制绑核后该核不再被其他进程抢占，现象彻底消失。
+- **剩余 25µs 峰值**：Linux 未配置 `isolcpus` / `SCHED_FIFO`，内核偶发短暂中断，属正常水平；生产环境加`isolcpus=0,1 nohz_full=0,1` + `SCHED_FIFO` 可进一步压到 `<5µs`。
 
 ## 项目结构
 
